@@ -1,0 +1,16 @@
+{
+  "prompt": "A large orange octopus is seen resting on the bottom of the ocean floor.",
+  "resolution": "832x480",
+  "video_length": 81,
+  "num_inference_steps": 30,
+  "seed": -1,
+  "guidance_scale": 4,
+  "guidance2_scale": 3,
+  "guidance_phases": 2,
+  "switch_threshold": 875,
+  "flow_shift": 12,
+  "image_prompt_type": "",
+  "video_prompt_type": "",
+  "activated_loras": [],
+  "loras_multipliers": ""
+}

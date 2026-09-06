@@ -1,0 +1,44 @@
+{
+  "models": [
+    {
+      "model_type": "t2v_2_2",
+      "name": "Wan2.2 Text2video 14B",
+      "family": "wan",
+      "base_model_type": "t2v_2_2",
+      "description": "Wan 2.2 Text 2 Video model",
+      "main_output": "video",
+      "inputs": []
+    },
+    {
+      "model_type": "i2v_2_2",
+      "name": "Wan2.2 Image2video 14B",
+      "family": "wan",
+      "base_model_type": "i2v_2_2",
+      "description": "Wan 2.2 Image 2 Video model.",
+      "main_output": "video",
+      "inputs": ["image"]
+    },
+    {
+      "model_type": "t2v",
+      "name": "Wan2.1 Text2video 14B",
+      "family": "wan",
+      "base_model_type": "t2v",
+      "description": "The original Wan Text 2 Video model.",
+      "main_output": "video",
+      "inputs": []
+    },
+    {
+      "model_type": "i2v",
+      "name": "Wan2.1 Image2video 480p 14B",
+      "family": "wan",
+      "base_model_type": "i2v",
+      "description": "The standard Wan Image 2 Video specialized to generate 480p images.",
+      "main_output": "video",
+      "inputs": ["image"]
+    }
+  ],
+  "total": 4,
+  "returned": 4,
+  "offset": 0,
+  "has_more": false
+}

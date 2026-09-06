@@ -1,0 +1,29 @@
+{
+  "job_id": "3d9a1c0e5b7f4a2d8c6e0f1a2b3c4d5e",
+  "done": true,
+  "cancel_requested": true,
+  "webui_submission_ready": false,
+  "webui_load_queue_token": "",
+  "created_at": 1710000000.0,
+  "updated_at": 1710000009.0,
+  "events": [],
+  "result": {
+    "success": false,
+    "cancelled": true,
+    "generated_files": [],
+    "errors": [
+      {
+        "message": "Generation was cancelled",
+        "task_index": 0,
+        "task_id": 1,
+        "stage": "cancelled",
+        "cancelled": true
+      }
+    ],
+    "total_tasks": 1,
+    "successful_tasks": 0,
+    "failed_tasks": 1,
+    "artifacts": [],
+    "gallery_items": []
+  }
+}

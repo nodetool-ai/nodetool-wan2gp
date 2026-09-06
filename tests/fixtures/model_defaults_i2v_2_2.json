@@ -1,0 +1,18 @@
+{
+  "prompt": "Several giant wooly mammoths approach treading through a snowy meadow.",
+  "resolution": "832x480",
+  "video_length": 81,
+  "num_inference_steps": 30,
+  "seed": -1,
+  "guidance_scale": 3.5,
+  "guidance2_scale": 3.5,
+  "guidance_phases": 2,
+  "switch_threshold": 900,
+  "flow_shift": 7.0,
+  "denoising_strength": 0.9,
+  "masking_strength": 0.1,
+  "image_prompt_type": "S",
+  "video_prompt_type": "",
+  "activated_loras": [],
+  "loras_multipliers": ""
+}

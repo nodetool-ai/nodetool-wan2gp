@@ -1,0 +1,9 @@
+{
+  "authors": [
+    "Matthias Georgi <matti.georgi@gmail.com>"
+  ],
+  "description": "Wan2GP nodes for Nodetool",
+  "name": "nodetool-wan2gp",
+  "repo_id": "nodetool-ai/nodetool-wan2gp",
+  "version": "0.1.0"
+}
