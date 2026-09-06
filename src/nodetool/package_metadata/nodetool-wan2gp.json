@@ -4,6 +4,461 @@
   ],
   "description": "Wan2GP nodes for Nodetool",
   "name": "nodetool-wan2gp",
+  "nodes": [
+    {
+      "basic_fields": [
+        "model_type",
+        "settings"
+      ],
+      "description": "Runs any model on your own Wan2GP server with the settings you supply.\n    video, generation, diffusion, Wan, Wan2GP, advanced, local\n\n    This node starts from the model's own generation defaults, applies your\n    settings on top, and returns the first output. Use it for models and\n    settings that the TextToVideo and ImageToVideo nodes do not cover. The\n    wangp_models and wangp_model tools on your server list the model ids and\n    their settings.\n\n    Use cases:\n    - Drive a model that this package has no dedicated node for\n    - Set guidance scale, flow shift, sliding windows or other expert settings\n    - Reproduce a settings file exported from the Wan2GP web UI\n    - Run a video-to-video or control-guided generation\n    - Try a new Wan2GP release before this package catches up",
+      "inline_fields": [
+        "server_url",
+        "timeout_seconds",
+        "seed",
+        "model_type"
+      ],
+      "input_fields": [
+        "settings",
+        "image",
+        "video"
+      ],
+      "namespace": "wan2gp.generate",
+      "node_type": "wan2gp.generate.Generate",
+      "outputs": [
+        {
+          "name": "output",
+          "type": {
+            "type": "video"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "default": "http://127.0.0.1:7866/mcp",
+          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Defaults to the WAN2GP_MCP_URL environment variable.",
+          "name": "server_url",
+          "title": "Server Url",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": 1800,
+          "description": "How long to wait for one generation before giving up, in seconds.",
+          "name": "timeout_seconds",
+          "title": "Timeout Seconds",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": -1,
+          "description": "Random seed. Use -1 to let Wan2GP pick a new seed for every run.",
+          "name": "seed",
+          "title": "Seed",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": "t2v_2_2",
+          "description": "Wan2GP model id to run. Call the wangp_models tool on your server for the ids it offers.",
+          "name": "model_type",
+          "title": "Model Type",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": {},
+          "description": "Wan2GP generation settings, applied on top of the model defaults. Keys such as prompt, resolution, video_length, num_inference_steps and guidance_scale. The reserved _api key is removed.",
+          "name": "settings",
+          "title": "Settings",
+          "type": {
+            "type": "dict",
+            "type_args": [
+              {
+                "type": "str"
+              },
+              {
+                "type": "any"
+              }
+            ]
+          }
+        },
+        {
+          "default": null,
+          "description": "Optional starting image. It is uploaded to the Wan2GP gallery and passed as image_start.",
+          "name": "image",
+          "title": "Image",
+          "type": {
+            "optional": true,
+            "type": "image"
+          }
+        },
+        {
+          "default": null,
+          "description": "Optional guide video. It is uploaded to the Wan2GP gallery and passed as video_guide.",
+          "name": "video",
+          "title": "Video",
+          "type": {
+            "optional": true,
+            "type": "video"
+          }
+        }
+      ],
+      "title": "Generate"
+    },
+    {
+      "basic_fields": [
+        "image",
+        "prompt",
+        "model_type",
+        "width",
+        "height",
+        "num_frames"
+      ],
+      "description": "Animates a still image with a Wan image-to-video model on your own Wan2GP server.\n    video, generation, image-to-video, diffusion, Wan, Wan2GP, animation, local\n\n    Wan2GP runs Wan 2.1 and Wan 2.2 image-to-video models on consumer GPUs. This\n    node uploads the image to the server's gallery, uses it as the first frame,\n    and returns the finished clip. The prompt describes the motion.\n\n    Use cases:\n    - Animate a photograph or a piece of artwork\n    - Add camera movement to a product shot\n    - Continue a rendered still into a moving shot\n    - Make a short social clip from a single frame\n    - Test motion prompts against one fixed starting image",
+      "inline_fields": [
+        "server_url",
+        "timeout_seconds",
+        "seed",
+        "prompt",
+        "negative_prompt",
+        "model_type",
+        "width",
+        "height",
+        "num_frames",
+        "fps",
+        "num_inference_steps",
+        "loras",
+        "lora_multipliers"
+      ],
+      "input_fields": [
+        "image"
+      ],
+      "namespace": "wan2gp.image_to_video",
+      "node_type": "wan2gp.image_to_video.ImageToVideo",
+      "outputs": [
+        {
+          "name": "output",
+          "type": {
+            "type": "video"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "default": "http://127.0.0.1:7866/mcp",
+          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Defaults to the WAN2GP_MCP_URL environment variable.",
+          "name": "server_url",
+          "title": "Server Url",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": 1800,
+          "description": "How long to wait for one generation before giving up, in seconds.",
+          "name": "timeout_seconds",
+          "title": "Timeout Seconds",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": -1,
+          "description": "Random seed. Use -1 to let Wan2GP pick a new seed for every run.",
+          "name": "seed",
+          "title": "Seed",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": {
+            "asset_id": null,
+            "data": null,
+            "metadata": null,
+            "type": "image",
+            "uri": ""
+          },
+          "description": "The image to use as the first frame of the video.",
+          "name": "image",
+          "title": "Image",
+          "type": {
+            "type": "image"
+          }
+        },
+        {
+          "default": "The camera slowly pushes in as the scene comes to life.",
+          "description": "Text description of how the image should move.",
+          "name": "prompt",
+          "title": "Prompt",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": "",
+          "description": "Text description of what to keep out of the video. Leave empty to use the model default.",
+          "name": "negative_prompt",
+          "title": "Negative Prompt",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": "i2v_2_2",
+          "description": "Wan2GP model id, for example i2v_2_2 for Wan2.2 Image2video 14B. Call the wangp_models tool on your server for the ids it offers.",
+          "name": "model_type",
+          "title": "Model Type",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": 832,
+          "description": "Output width in pixels. Must be a multiple of 16.",
+          "name": "width",
+          "title": "Width",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 480,
+          "description": "Output height in pixels. Must be a multiple of 16.",
+          "name": "height",
+          "title": "Height",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 81,
+          "description": "Number of frames to generate. Wan2GP rounds this to the nearest count the model allows.",
+          "name": "num_frames",
+          "title": "Num Frames",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 16,
+          "description": "Frames per second of the output video.",
+          "name": "fps",
+          "title": "Fps",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 30,
+          "description": "Number of denoising steps. More steps give more detail and take longer.",
+          "name": "num_inference_steps",
+          "title": "Num Inference Steps",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": [],
+          "description": "LoRA identifiers to activate, as returned by the wangp_list_loras tool.",
+          "name": "loras",
+          "title": "Loras",
+          "type": {
+            "type": "list",
+            "type_args": [
+              {
+                "type": "str"
+              }
+            ]
+          }
+        },
+        {
+          "default": [],
+          "description": "Weight for each LoRA, in the same order. Leave empty to use a weight of 1 for each.",
+          "name": "lora_multipliers",
+          "title": "Lora Multipliers",
+          "type": {
+            "type": "list",
+            "type_args": [
+              {
+                "type": "float"
+              }
+            ]
+          }
+        }
+      ],
+      "title": "Image To Video"
+    },
+    {
+      "basic_fields": [
+        "prompt",
+        "model_type",
+        "width",
+        "height",
+        "num_frames"
+      ],
+      "description": "Generates a video from a text prompt with a Wan video model on your own Wan2GP server.\n    video, generation, text-to-video, diffusion, Wan, Wan2GP, local\n\n    Wan2GP runs Wan 2.1 and Wan 2.2 text-to-video models on consumer GPUs. This\n    node sends the prompt and the generation settings to a Wan2GP server you\n    start yourself, follows the job, and returns the finished clip.\n\n    Use cases:\n    - Turn a written scene description into a short clip\n    - Produce b-roll and background footage for an edit\n    - Draft storyboard shots before a live shoot\n    - Generate looping motion graphics from a style prompt\n    - Run repeated prompt variations on local hardware without an API bill",
+      "inline_fields": [
+        "server_url",
+        "timeout_seconds",
+        "seed",
+        "prompt",
+        "negative_prompt",
+        "model_type",
+        "width",
+        "height",
+        "num_frames",
+        "fps",
+        "num_inference_steps",
+        "loras",
+        "lora_multipliers"
+      ],
+      "namespace": "wan2gp.text_to_video",
+      "node_type": "wan2gp.text_to_video.TextToVideo",
+      "outputs": [
+        {
+          "name": "output",
+          "type": {
+            "type": "video"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "default": "http://127.0.0.1:7866/mcp",
+          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Defaults to the WAN2GP_MCP_URL environment variable.",
+          "name": "server_url",
+          "title": "Server Url",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": 1800,
+          "description": "How long to wait for one generation before giving up, in seconds.",
+          "name": "timeout_seconds",
+          "title": "Timeout Seconds",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": -1,
+          "description": "Random seed. Use -1 to let Wan2GP pick a new seed for every run.",
+          "name": "seed",
+          "title": "Seed",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": "A large orange octopus is seen resting on the bottom of the ocean floor.",
+          "description": "Text description of the video to generate.",
+          "name": "prompt",
+          "title": "Prompt",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": "",
+          "description": "Text description of what to keep out of the video. Leave empty to use the model default.",
+          "name": "negative_prompt",
+          "title": "Negative Prompt",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": "t2v_2_2",
+          "description": "Wan2GP model id, for example t2v_2_2 for Wan2.2 Text2video 14B. Call the wangp_models tool on your server for the ids it offers.",
+          "name": "model_type",
+          "title": "Model Type",
+          "type": {
+            "type": "str"
+          }
+        },
+        {
+          "default": 832,
+          "description": "Output width in pixels. Must be a multiple of 16.",
+          "name": "width",
+          "title": "Width",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 480,
+          "description": "Output height in pixels. Must be a multiple of 16.",
+          "name": "height",
+          "title": "Height",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 81,
+          "description": "Number of frames to generate. Wan2GP rounds this to the nearest count the model allows.",
+          "name": "num_frames",
+          "title": "Num Frames",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 16,
+          "description": "Frames per second of the output video.",
+          "name": "fps",
+          "title": "Fps",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 30,
+          "description": "Number of denoising steps. More steps give more detail and take longer.",
+          "name": "num_inference_steps",
+          "title": "Num Inference Steps",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": [],
+          "description": "LoRA identifiers to activate, as returned by the wangp_list_loras tool.",
+          "name": "loras",
+          "title": "Loras",
+          "type": {
+            "type": "list",
+            "type_args": [
+              {
+                "type": "str"
+              }
+            ]
+          }
+        },
+        {
+          "default": [],
+          "description": "Weight for each LoRA, in the same order. Leave empty to use a weight of 1 for each.",
+          "name": "lora_multipliers",
+          "title": "Lora Multipliers",
+          "type": {
+            "type": "list",
+            "type_args": [
+              {
+                "type": "float"
+              }
+            ]
+          }
+        }
+      ],
+      "title": "Text To Video"
+    }
+  ],
   "repo_id": "nodetool-ai/nodetool-wan2gp",
   "version": "0.1.0"
 }

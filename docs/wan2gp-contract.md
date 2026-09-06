@@ -268,10 +268,16 @@ migration (`wgp.py:3181-3185`).
 | `image_start` | gallery `media_id` |
 | `image_prompt_type` | `"S"` for an image-to-video run |
 | `activated_loras` | list of ids from `wangp_list_loras` |
-| `loras_multipliers` | matching weights |
+| `loras_multipliers` | matching weights as one space separated string |
 
 `activated_loras` values must not be absolute paths or contain `..`; the server
 raises `PermissionError` otherwise (`shared/mcp_server.py:653-658`).
+
+`loras_multipliers` is documented as a string, space or newline separated, with
+`#` starting a comment line (`docs/SETTINGS.md:177`). `preparse_loras_multipliers`
+also accepts a list (`shared/utils/loras_mutipliers.py:4-6`), but this package
+sends the documented form: one space separated string, in the order of
+`activated_loras`.
 
 `_api` is reserved API metadata, not a generation setting
 (`docs/API.md:556-570`). This package strips it from user-supplied settings and

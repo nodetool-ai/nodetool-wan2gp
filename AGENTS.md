@@ -26,6 +26,12 @@ grep -rn "shared.api\|import wgp\|mmgp" src tests scripts
   example use cases. The docstring is the node description in the UI.
 - Provide a `get_basic_fields` class method listing the most relevant fields.
 - Nodes never build JSON-RPC. Every MCP call goes through `_client.py`.
+- The private modules split the work: `_client.py` speaks MCP, `_settings.py`
+  maps node fields to a Wan2GP settings dict, and `_base.py` holds
+  `_Wan2GPNode` with the connection fields and the submit, poll, download loop.
+  A node file adds fields, a docstring, and the settings it wants.
+- A node type id follows the module path, for example
+  `wan2gp.text_to_video.TextToVideo`.
 
 ## Python Environment
 
