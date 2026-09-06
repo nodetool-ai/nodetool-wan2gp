@@ -270,3 +270,39 @@ def client_factory(fake_server: FakeWan2GP):
 @pytest.fixture
 def server_url() -> str:
     return "http://wan2gp.test/mcp"
+
+
+@pytest.fixture
+def wan2gp_nodes(monkeypatch, client_factory):
+    """Point every node at the fake server instead of a real socket.
+
+    Nodes build their own client, so the test replaces the class the base node
+    reaches for. It also drops the poll interval, so a test never waits.
+    """
+    from nodetool.nodes.wan2gp import _base
+    from nodetool.nodes.wan2gp._client import Wan2GPClient
+
+    def make_client(url: str, timeout: float = 1800.0) -> Wan2GPClient:
+        return Wan2GPClient(url, timeout=timeout, httpx_client_factory=client_factory)
+
+    monkeypatch.setattr(_base, "Wan2GPClient", make_client)
+    monkeypatch.setattr(_base, "POLL_INTERVAL_SECONDS", 0.0)
+    return _base
+
+
+@pytest.fixture
+def context(tmp_path):
+    """A real ProcessingContext with a workspace, as the node tests use it."""
+    from nodetool.workflows.processing_context import ProcessingContext
+
+    return ProcessingContext(workspace_dir=str(tmp_path))
+
+
+def progress_messages(context) -> list:
+    """Drain the context's message queue and return the NodeProgress messages."""
+    from nodetool.workflows.types import NodeProgress
+
+    messages = []
+    while not context.message_queue.empty():
+        messages.append(context.message_queue.get_nowait())
+    return [m for m in messages if isinstance(m, NodeProgress)]
