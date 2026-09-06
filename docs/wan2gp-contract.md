@@ -9,6 +9,20 @@ until someone runs `scripts/smoke.py` against a real server.
 Line references point into the Wan2GP checkout, not into this repository. This
 package never imports Wan2GP; it only speaks to it over HTTP.
 
+## What had to be discovered, and where it is answered
+
+| Question | Section | Pinned fixture |
+| --- | --- | --- |
+| Input schema of `wangp_generate.source` | [`wangp_generate`](#wangp_generatesource-waitfalse-timeout_snone-event_limitnone) | `tests/fixtures/job_submitted.json` |
+| Shape `wangp_get_job` returns | [Job snapshot](#job-snapshot-what-wangp_get_jobjob_id-event_limit-returns) | `job_running.json`, `job_done.json`, `job_failed.json`, `job_cancelled.json` |
+| How the upload PUT URL wants the body | [`wangp_create_gallery_upload`](#wangp_create_gallery_uploadfilename) | `gallery_upload_ticket.json`, `gallery_upload_result.json` |
+| What `wangp_create_gallery_download` returns | [`wangp_create_gallery_download`](#wangp_create_gallery_downloadmedia_id) | `gallery_download_ticket.json`, `tiny.mp4` |
+| `model_type` strings for Wan 2.1 and 2.2 T2V and I2V | [`model_type` strings](#model_type-strings) | `models.json`, `model_defaults_t2v_2_2.json`, `model_defaults_i2v_2_2.json` |
+| `image_prompt_type` for an image-to-video run | [`image_prompt_type`](#image_prompt_type-for-an-image-to-video-run) | asserted in `tests/test_settings.py` |
+| How nodetool-core signals cancellation | [Cancellation](#how-nodetool-signals-cancellation) | asserted in `tests/test_client.py` |
+
+Every row was answered by reading source, not by calling a server.
+
 ## Transport
 
 Launch the server one of two ways:
@@ -21,20 +35,20 @@ python -m shared.mcp_server --root <WanGP repo> --output-dir <dir> \
   --transport streamable-http --host 127.0.0.1 --port 7866 --job-event-limit 20
 ```
 
-MCP clients connect to `http://<host>:<port>/mcp` (`docs/API.md:377`). The path
-is fixed: FastMCP's streamable-HTTP app mounts there, and `build_server` sets
+MCP clients connect to `http://<host>:<port>/mcp` (`docs/API.md:378`). The path
+is fixed: FastMCP's streamable-HTTP app mounts there, and the launcher sets
 `json_response=True` and `stateless_http=True` for this transport
-(`shared/mcp_server.py:477-479`). Stateless means the server issues no
+(`shared/mcp_server.py:1576-1578`). Stateless means the server issues no
 `mcp-session-id`, so the client never opens the server-to-client SSE stream.
 
 `--job-event-limit` exists only on `python -m shared.mcp_server`
-(`shared/mcp_server.py:493`). The `wgp.py --mcp` path does not forward it
+(`shared/mcp_server.py:1592`). The `wgp.py --mcp` path does not forward it
 (`wgp.py:13741-13755`), so it uses the default of 20 events per snapshot.
 
 The media transfer routes live on the same origin, one level up from `/mcp`:
 `/wangp_api/gallery/upload/{token}` and `/wangp_api/gallery/download/{token}`
-(`shared/mcp_server.py:30`, `:64`). Both tools return **relative** URLs, so a
-client must resolve them against the MCP server origin (`docs/API.md:395`).
+(`shared/mcp_server.py:1129`, `:1163`). Both tools return **relative** URLs, so a
+client must resolve them against the MCP server origin (`docs/API.md:391`).
 
 ## `wangp_generate(source, wait=False, timeout_s=None, event_limit=None)`
 
@@ -50,7 +64,7 @@ Declared at `shared/mcp_server.py:1513`.
 - `timeout_s` applies only when `wait=True`.
 - `event_limit` caps how many recent events the returned snapshot carries. It
   falls back to the server's `--job-event-limit`
-  (`shared/mcp_server.py:1526`).
+  (`shared/mcp_server.py:1525`).
 - The return value is a **job snapshot**, the same shape `wangp_get_job`
   returns, so `job_id` comes back from the submit call itself.
 
@@ -132,13 +146,13 @@ work when NodeTool and Wan2GP share a filesystem, so this package does not.
 Cancellation is cooperative: the job keeps running until the model reaches a
 checkpoint, then finishes with `result.success == false` and a cancellation
 entry in `result.errors` whose `stage` is `cancelled`
-(`shared/api.py:504-509`, `shared/api.py:262-267`, `docs/API.md:1061`).
+(`shared/api.py:504-509`, `shared/api.py:262-267`, `docs/API.md:1055-1062`).
 
 ## `wangp_create_gallery_upload(filename)`
 
 `shared/mcp_server.py:1431`, implemented at `shared/mcp_server.py:739-747`.
 Registered only when the transport is not stdio
-(`shared/mcp_server.py:480`, `:330`).
+(`shared/mcp_server.py:1125`, `:1579`).
 
 Returns:
 
@@ -155,9 +169,9 @@ Returns:
 (`shared/mcp_server.py:31-33`).
 
 The upload itself is a plain `PUT` of the **raw file bytes** as the request
-body, streamed (`shared/mcp_server.py:49-53`). No multipart, no JSON envelope,
+body, streamed (`shared/mcp_server.py:1145-1152`). No multipart, no JSON envelope,
 no required content type. `Content-Length` is checked against the 8 GiB cap when
-present (`shared/mcp_server.py:37-44`). The token is one-use: it is popped on the
+present (`shared/mcp_server.py:1136-1144`). The token is one-use: it is popped on the
 first request (`shared/mcp_server.py:749-752`) and expires after 600 seconds
 (`shared/mcp_server.py:23`).
 
@@ -169,13 +183,13 @@ A successful upload returns the registered gallery record plus a status:
  "description": "...", "source": "WanGP", "selected": true, "in_gallery": true}
 ```
 
-(`shared/mcp_server.py:62`, record shape at `shared/mcp_server.py:360-380`.)
+(`shared/mcp_server.py:1160`, record shape at `shared/mcp_server.py:360-380`.)
 
 **`media_id` is the value to pass as `image_start`.** Its format is
 `<gallery>:<first 12 hex of a sha1 over the normalized path>` where gallery is
 `visual` or `audio` (`shared/utils/gallery_media.py:18`). Upload failures return
 JSON with an `error` key and status 400 or 413
-(`shared/mcp_server.py:55-61`).
+(`shared/mcp_server.py:1153-1159`).
 
 ## `wangp_create_gallery_download(media_id)`
 
@@ -190,7 +204,7 @@ Returns:
 ```
 
 `GET` on that URL streams the file with its guessed content type
-(`shared/mcp_server.py:64-72`). The token is one-use and the media must already
+(`shared/mcp_server.py:1163-1170`). The token is one-use and the media must already
 be registered in a gallery; an unknown `media_id` raises `KeyError`
 (`shared/mcp_server.py:390`).
 
@@ -213,7 +227,7 @@ raises `KeyError` (`shared/mcp_server.py:116`).
 ## `model_type` strings
 
 A `model_type` is the stem of a JSON file under `defaults/`:
-`model_type = os.path.basename(file_path)[:-5]` (`wgp.py:3294`, discovery at
+`model_type = os.path.basename(file_path)[:-5]` (`wgp.py:3295`, discovery at
 `wgp.py:3280-3281`). The Wan 2.1 and 2.2 video models are therefore:
 
 | `model_type` | Name | `architecture` |
