@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/combined-wangp-image
+      - main
     paths:
       - Dockerfile.combined
       - scripts/combined-entrypoint.sh

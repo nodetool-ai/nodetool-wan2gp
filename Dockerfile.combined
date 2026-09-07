@@ -22,7 +22,7 @@ USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential cmake ffmpeg git libgl1 libglib2.0-0 libportaudio2 \
-        libsndfile1 ninja-build \
+        libsndfile1 ninja-build python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # WanGP deliberately lives in a separate environment. Its pinned MCP and
