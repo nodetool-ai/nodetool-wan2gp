@@ -3,12 +3,29 @@
 This repository provides Wan2GP nodes for the [nodetool](https://github.com/nodetool-ai/nodetool)
 project and depends on [nodetool-core](https://github.com/nodetool-ai/nodetool-core).
 
-## License boundary (read this first)
+## License and distribution boundary (read this first)
 
-Wan2GP is proprietary (WanGP Community License 2.0) and `mmgp` is
-non-commercial-only. This package must never import from either one, at runtime,
-in tests, or in scripts. The only connection to Wan2GP is an MCP HTTP call to a
-server the user runs. Keep it that way.
+The Python node package stays an MCP-only client: modules under `src`, tests,
+and development scripts must not import WanGP or `mmgp`. All MCP calls still go
+through `_client.py`.
+
+`Dockerfile.combined` is the sole exception to the no-bundling rule. It may
+redistribute a revision-pinned WanGP and `mmgp` in a separate Python environment
+for free, non-monetized use under the WanGP Community License 2.0 and the mmgp
+non-commercial license. The combined image must:
+
+- include the complete WanGP license, mmgp license and attribution, and WanGP's
+  bundled third-party notices;
+- identify the exact upstream revisions and state whether they were modified;
+- identify itself prominently as non-commercial and not endorsed by WanGP;
+- keep WanGP isolated from the AGPL NodeTool environment and connect over MCP;
+- never be sold, white-labelled, embedded in a paid product, or exposed as a
+  paid, sponsored, ad-supported, SaaS, hosted, managed, API, OEM, marketplace,
+  or otherwise monetized service without the necessary written licenses; and
+- preserve all separate model, weight, dataset, and dependency license terms.
+
+Do not add model weights to the image. Runtime-downloaded weights retain their
+own licenses and must be reviewed before use or redistribution.
 
 This check must return nothing:
 

@@ -1,0 +1,86 @@
+# syntax=docker/dockerfile:1.7
+# Free, non-monetized evaluation image. See NOTICE.md and
+# docs/combined-image-licenses.md before building or redistributing it.
+ARG CORE_IMAGE=ghcr.io/nodetool-ai/nodetool:latest
+FROM ${CORE_IMAGE}
+
+ARG WANGP_REPOSITORY=https://github.com/deepbeepmeep/Wan2GP.git
+ARG WANGP_COMMIT=057f9ecab9ad57dfbec9768b2daf7a4426ce986c
+ARG MMGP_REPOSITORY=https://github.com/deepbeepmeep/mmgp.git
+ARG MMGP_COMMIT=589ba050d320c4df879f48d11b23d6a88e6c68c8
+
+LABEL org.opencontainers.image.title="NodeTool + WanGP non-commercial test image" \
+      org.opencontainers.image.description="Free, non-monetized evaluation bundle; commercial service and resale prohibited without separate licenses" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later AND LicenseRef-WanGP-Community-2.0 AND LicenseRef-mmGP-NonCommercial" \
+      org.opencontainers.image.source="https://github.com/nodetool-ai/nodetool-wan2gp" \
+      io.nodetool.wangp.commit="057f9ecab9ad57dfbec9768b2daf7a4426ce986c" \
+      io.nodetool.mmgp.commit="589ba050d320c4df879f48d11b23d6a88e6c68c8" \
+      io.nodetool.commercial-use="prohibited-without-separate-written-license"
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential cmake ffmpeg git libgl1 libglib2.0-0 libportaudio2 \
+        libsndfile1 ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
+# WanGP deliberately lives in a separate environment. Its pinned MCP and
+# Pydantic versions conflict with the NodeTool environment.
+RUN /opt/venv/bin/python -m venv --copies /opt/wan2gp-venv \
+    && /opt/wan2gp-venv/bin/python -m pip install --upgrade pip setuptools wheel \
+    && /opt/wan2gp-venv/bin/python -m pip install \
+        torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
+        --index-url https://download.pytorch.org/whl/cu130
+
+RUN git clone --filter=blob:none "${WANGP_REPOSITORY}" /opt/Wan2GP \
+    && git -C /opt/Wan2GP fetch --depth 1 origin "${WANGP_COMMIT}" \
+    && git -C /opt/Wan2GP checkout --detach "${WANGP_COMMIT}" \
+    && /opt/wan2gp-venv/bin/python -m pip install -r /opt/Wan2GP/requirements.txt
+
+# Preserve the separately licensed mmgp terms explicitly, in addition to the
+# metadata installed by pip. WanGP's LICENSE.txt and third-party license tree
+# remain in the revision-pinned source checkout at /opt/Wan2GP.
+RUN mkdir -p /opt/licenses/mmgp \
+    && git clone --filter=blob:none "${MMGP_REPOSITORY}" /tmp/mmgp-license \
+    && git -C /tmp/mmgp-license fetch --depth 1 origin "${MMGP_COMMIT}" \
+    && git -C /tmp/mmgp-license checkout --detach "${MMGP_COMMIT}" \
+    && cp /tmp/mmgp-license/LICENSE.md /opt/licenses/mmgp/LICENSE.md \
+    && printf '%s\n' \
+        'mmgp by DeepBeepMeep' \
+        'https://github.com/deepbeepmeep/mmgp' \
+        "Pinned revision: ${MMGP_COMMIT}" \
+        'No local modifications.' \
+        > /opt/licenses/mmgp/ATTRIBUTION.txt \
+    && rm -rf /tmp/mmgp-license
+
+COPY . /tmp/nodetool-wan2gp
+RUN /opt/venv/bin/python -m pip install \
+        --index-url https://pypi.org/simple \
+        /tmp/nodetool-wan2gp \
+    && mkdir -p /opt/licenses/nodetool-wan2gp \
+    && cp /tmp/nodetool-wan2gp/NOTICE.md /opt/licenses/nodetool-wan2gp/NOTICE.md \
+    && cp /tmp/nodetool-wan2gp/docs/combined-image-licenses.md \
+        /opt/licenses/nodetool-wan2gp/combined-image-licenses.md \
+    && rm -rf /tmp/nodetool-wan2gp /root/.cache/pip /tmp/* /var/tmp/*
+
+COPY scripts/combined-entrypoint.sh /usr/local/bin/nodetool-wangp-entrypoint
+RUN chmod 0755 /usr/local/bin/nodetool-wangp-entrypoint \
+    && mkdir -p /workspace/wan2gp/config /workspace/wan2gp/outputs /workspace/cache
+
+ENV WAN2GP_MCP_URL=http://127.0.0.1:7866/mcp \
+    WANGP_CONFIG_DIR=/workspace/wan2gp/config \
+    WANGP_OUTPUT_DIR=/workspace/wan2gp/outputs \
+    HF_HOME=/workspace/cache/huggingface \
+    PYTHONUNBUFFERED=1 \
+    SDL_AUDIODRIVER=dummy \
+    PULSE_RUNTIME_PATH=/tmp/pulse-runtime
+
+WORKDIR /app
+EXPOSE 7777
+HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=8 \
+    CMD curl -fsS http://127.0.0.1:7777/health >/dev/null \
+        && curl -sS -o /dev/null http://127.0.0.1:7866/mcp \
+        || exit 1
+
+ENTRYPOINT ["/usr/local/bin/nodetool-wangp-entrypoint"]
