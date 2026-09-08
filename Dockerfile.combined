@@ -9,8 +9,8 @@ ARG WANGP_COMMIT=057f9ecab9ad57dfbec9768b2daf7a4426ce986c
 ARG MMGP_REPOSITORY=https://github.com/deepbeepmeep/mmgp.git
 ARG MMGP_COMMIT=589ba050d320c4df879f48d11b23d6a88e6c68c8
 
-LABEL org.opencontainers.image.title="NodeTool + WanGP non-commercial test image" \
-      org.opencontainers.image.description="Free, non-monetized evaluation bundle; commercial service and resale prohibited without separate licenses" \
+LABEL org.opencontainers.image.title="NodeTool WanGP non-commercial GPU worker" \
+      org.opencontainers.image.description="Authenticated Python execution worker and private WanGP MCP; free non-monetized evaluation only" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later AND LicenseRef-WanGP-Community-2.0 AND LicenseRef-mmGP-NonCommercial" \
       org.opencontainers.image.source="https://github.com/nodetool-ai/nodetool-wan2gp" \
       io.nodetool.wangp.commit="057f9ecab9ad57dfbec9768b2daf7a4426ce986c" \
@@ -62,10 +62,14 @@ RUN /opt/venv/bin/python -m pip install \
     && cp /tmp/nodetool-wan2gp/NOTICE.md /opt/licenses/nodetool-wan2gp/NOTICE.md \
     && cp /tmp/nodetool-wan2gp/docs/combined-image-licenses.md \
         /opt/licenses/nodetool-wan2gp/combined-image-licenses.md \
+    && cp /tmp/nodetool-wan2gp/docs/combined-worker.md \
+        /opt/licenses/nodetool-wan2gp/combined-worker.md \
     && rm -rf /tmp/nodetool-wan2gp /root/.cache/pip /tmp/* /var/tmp/*
 
 COPY scripts/combined-entrypoint.sh /usr/local/bin/nodetool-wangp-entrypoint
+COPY scripts/combined-healthcheck.py /usr/local/bin/nodetool-wangp-healthcheck
 RUN chmod 0755 /usr/local/bin/nodetool-wangp-entrypoint \
+        /usr/local/bin/nodetool-wangp-healthcheck \
     && mkdir -p /workspace/wan2gp/config /workspace/wan2gp/outputs /workspace/cache
 
 ENV WAN2GP_MCP_URL=http://127.0.0.1:7866/mcp \
@@ -79,8 +83,6 @@ ENV WAN2GP_MCP_URL=http://127.0.0.1:7866/mcp \
 WORKDIR /app
 EXPOSE 7777
 HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=8 \
-    CMD curl -fsS http://127.0.0.1:7777/health >/dev/null \
-        && curl -sS -o /dev/null http://127.0.0.1:7866/mcp \
-        || exit 1
+    CMD ["/opt/venv/bin/python", "/usr/local/bin/nodetool-wangp-healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/nodetool-wangp-entrypoint"]

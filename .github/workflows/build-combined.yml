@@ -8,7 +8,9 @@ on:
     paths:
       - Dockerfile.combined
       - scripts/combined-entrypoint.sh
+      - scripts/combined-healthcheck.py
       - docs/combined-image-licenses.md
+      - docs/combined-worker.md
       - NOTICE.md
       - pyproject.toml
       - src/**
