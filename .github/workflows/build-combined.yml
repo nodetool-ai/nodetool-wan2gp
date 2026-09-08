@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - Dockerfile.combined
+      - combined/**
       - scripts/combined-entrypoint.sh
       - scripts/combined-healthcheck.py
       - docs/combined-image-licenses.md

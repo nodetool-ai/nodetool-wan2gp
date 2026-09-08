@@ -9,8 +9,9 @@ The Python node package stays an MCP-only client: modules under `src`, tests,
 and development scripts must not import WanGP or `mmgp`. All MCP calls still go
 through `_client.py`.
 
-`Dockerfile.combined` is the sole exception to the no-bundling rule. It may
-redistribute a revision-pinned WanGP and `mmgp` in a separate Python environment
+`Dockerfile.combined` and modules under `combined/` are the sole exceptions to
+the no-bundling rule. They may redistribute and directly call a revision-pinned
+WanGP and `mmgp` in a separate Python environment
 for free, non-monetized use under the WanGP Community License 2.0 and the mmgp
 non-commercial license. The combined image must:
 
@@ -18,7 +19,9 @@ non-commercial license. The combined image must:
   bundled third-party notices;
 - identify the exact upstream revisions and state whether they were modified;
 - identify itself prominently as non-commercial and not endorsed by WanGP;
-- keep WanGP isolated from the AGPL NodeTool environment and connect over MCP;
+- keep WanGP isolated from the AGPL NodeTool environment. The public node
+  package connects over MCP; combined-image adapters may call WanGP directly
+  from the isolated WanGP interpreter;
 - never be sold, white-labelled, embedded in a paid product, or exposed as a
   paid, sponsored, ad-supported, SaaS, hosted, managed, API, OEM, marketplace,
   or otherwise monetized service without the necessary written licenses; and
