@@ -43,39 +43,31 @@ export HF_HOME="${HF_HOME:-${workspace_dir}/cache/huggingface}"
 
 mkdir -p "${config_dir}" "${output_dir}" "${HF_HOME}"
 
-# Create the persisted WanGP config once. This process owns model settings, not
-# NodeTool credentials; request credentials arrive only inside worker messages.
-/opt/venv/bin/python - "${config_path}" "${output_dir}" <<'PY'
+# WanGP owns its config schema and creates a complete default file when none is
+# present. Archive the incomplete three-key file produced by combined images
+# before this fix, then let the pinned upstream revision initialize it.
+/opt/venv/bin/python - "${config_path}" <<'PY'
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 path = Path(sys.argv[1])
-if path.exists():
+if not path.exists():
     raise SystemExit(0)
-payload = {
-    "save_path": sys.argv[2],
-    "image_save_path": sys.argv[2],
-    "audio_save_path": sys.argv[2],
-}
-fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
 try:
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(payload, stream, indent=2)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    try:
-        os.link(temporary, path)
-    except FileExistsError:
-        pass
-finally:
-    try:
-        os.unlink(temporary)
-    except FileNotFoundError:
-        pass
+    config = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit("Existing WanGP config is unreadable; refusing to overwrite it")
+
+legacy_keys = {"save_path", "image_save_path", "audio_save_path"}
+if isinstance(config, dict) and set(config) <= legacy_keys and "attention_mode" not in config:
+    backup = path.with_suffix(".incomplete.json")
+    counter = 1
+    while backup.exists():
+        backup = path.with_suffix(f".incomplete-{counter}.json")
+        counter += 1
+    path.rename(backup)
+    print(f"Archived incomplete WanGP config as {backup}.")
 PY
 
 wangp_pid=""
