@@ -38,6 +38,17 @@ class _Emitter:
             self._stream.flush()
 
 
+def _configure_wangp_root() -> Path:
+    """Make the pinned WanGP checkout importable from this copied script."""
+    root = Path(os.environ.get("WANGP_ROOT", "/opt/Wan2GP")).resolve()
+    if not (root / "shared").is_dir():
+        raise FileNotFoundError(f"WanGP checkout is missing its shared package: {root}")
+    root_text = str(root)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+    return root
+
+
 def _model_files(runtime: Any, model_type: str) -> list[tuple[str, int, int]]:
     """Mirror WanGP's own pre-load selection, stopping before model loading."""
     module = runtime.module
@@ -135,6 +146,7 @@ def _prepare(runtime: Any, model_type: str) -> None:
 def main() -> int:
     emitter = _Emitter()
     request = _read_request()
+    wangp_root = _configure_wangp_root()
     model_type = str(request.get("model_type") or "").strip()
     if not model_type:
         raise ValueError("model_type is required")
@@ -188,7 +200,7 @@ def main() -> int:
             from shared.api import init
 
             session = init(
-                root=os.environ.get("WANGP_ROOT", "/opt/Wan2GP"),
+                root=str(wangp_root),
                 config_path=os.environ.get("WANGP_CONFIG_PATH"),
                 output_dir=os.environ.get("WANGP_OUTPUT_DIR"),
                 console_output=True,
