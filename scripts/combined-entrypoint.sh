@@ -7,6 +7,21 @@ echo "NOTICE: License texts are under /opt/Wan2GP and /opt/licenses."
 
 mkdir -p "${WANGP_CONFIG_DIR}" "${WANGP_OUTPUT_DIR}" "${HF_HOME}"
 
+# Headless NodeTool deployments cannot use the desktop keychain. Generate a
+# deployment-specific master key on first boot and keep it on the persistent
+# workspace volume. An explicitly supplied key always takes precedence.
+if [[ -z "${SECRETS_MASTER_KEY:-}" ]]; then
+    master_key_file="${SECRETS_MASTER_KEY_FILE:-/workspace/.nodetool-secrets-master-key}"
+    umask 077
+    if [[ ! -s "${master_key_file}" ]]; then
+        /opt/venv/bin/python -c \
+            'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())' \
+            > "${master_key_file}"
+    fi
+    IFS= read -r SECRETS_MASTER_KEY < "${master_key_file}"
+    export SECRETS_MASTER_KEY
+fi
+
 shutdown() {
     trap - TERM INT
     kill -TERM "${wangp_pid:-}" "${nodetool_pid:-}" 2>/dev/null || true
