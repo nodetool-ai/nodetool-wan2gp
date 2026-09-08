@@ -11,6 +11,17 @@ the desktop keychain, or create/read a `SECRETS_MASTER_KEY`. The loopback MCP
 URL is internal plumbing between the Python node package and WanGP; it is not a
 second public service.
 
+The worker also advertises the `wangp` model-preparation backend. A
+`models.prepare` request launches a short-lived adapter in WanGP's isolated
+Python environment. The adapter calls WanGP's existing download functions and
+does not patch or replace them. It observes the model/cache directories and the
+adapter process's Linux I/O counters, reporting bytes written, transfer rate,
+active files, free disk space, and time since activity. Unknown remote totals
+are reported as `total_bytes: 0`. After the configured quiet period, progress
+continues with `stalled: true`; the worker does not abort automatically.
+The combined Dockerfile pins the NodeTool worker revision that implements this
+protocol so it does not depend on when the moving base image is rebuilt.
+
 ## Runtime configuration
 
 Starting the container requires both:

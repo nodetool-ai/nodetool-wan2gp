@@ -36,12 +36,14 @@ for port in "${mcp_port}" "${worker_port}"; do
 done
 
 config_dir="${WANGP_CONFIG_DIR:-${workspace_dir}/wan2gp/config}"
+model_dir="${WANGP_MODEL_DIR:-${workspace_dir}/wan2gp/models}"
 output_dir="${WANGP_OUTPUT_DIR:-${workspace_dir}/wan2gp/outputs}"
 config_path="${config_dir}/wgp_config.json"
+export WANGP_CONFIG_PATH="${config_path}"
 export WAN2GP_MCP_URL="http://${mcp_host}:$((10#${mcp_port}))/mcp"
 export HF_HOME="${HF_HOME:-${workspace_dir}/cache/huggingface}"
 
-mkdir -p "${config_dir}" "${output_dir}" "${HF_HOME}"
+mkdir -p "${config_dir}" "${model_dir}" "${output_dir}" "${HF_HOME}"
 
 # WanGP owns its config schema and creates a complete default file when none is
 # present. Archive the incomplete three-key file produced by combined images

@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 # themselves, over MCP streamable HTTP. It never imports Wan2GP or mmgp, so it
 # needs no torch, no diffusers, and no model runtime of its own.
 dependencies = [
-    "nodetool-core>=0.7.0",
+    "nodetool-core[audio]>=0.8.0",
     "httpx>=0.27",
     "mcp>=1.16.0,<2.0.0",
 ]
