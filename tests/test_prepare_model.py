@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from combined.prepare_model import _model_files, _prepare  # noqa: E402
+from combined.prepare_model import (  # noqa: E402
+    _configure_wangp_root,
+    _model_files,
+    _prepare,
+)
 
 
 class FakeWanGP:
@@ -43,6 +47,19 @@ class FakeWanGP:
 
     def download_models(self, *args, **kwargs):
         self.downloads.append((*args, kwargs))
+
+
+def test_configure_wangp_root_adds_copied_checkout_to_import_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (tmp_path / "shared").mkdir()
+    monkeypatch.setenv("WANGP_ROOT", str(tmp_path))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    root = _configure_wangp_root()
+
+    assert root == tmp_path.resolve()
+    assert sys.path[0] == str(tmp_path.resolve())
 
 
 def test_model_files_match_wangp_primary_secondary_and_modules() -> None:
