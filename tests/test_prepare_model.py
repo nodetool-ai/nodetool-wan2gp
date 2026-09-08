@@ -1,6 +1,10 @@
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
-from combined.prepare_model import _model_files, _prepare
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from combined.prepare_model import _model_files, _prepare  # noqa: E402
 
 
 class FakeWanGP:

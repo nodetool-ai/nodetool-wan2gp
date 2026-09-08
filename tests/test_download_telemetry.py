@@ -1,7 +1,10 @@
+import sys
 from pathlib import Path
 
-from combined import download_telemetry as telemetry_module
-from combined.download_telemetry import DownloadTelemetry
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from combined import download_telemetry as telemetry_module  # noqa: E402
+from combined.download_telemetry import DownloadTelemetry  # noqa: E402
 
 
 class Clock:
