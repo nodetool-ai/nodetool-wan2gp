@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from combined.provider_adapter import (  # noqa: E402
     _Callbacks,
     _generated_path,
+    _models,
     _settings,
-    _video_models,
 )
 
 
@@ -39,7 +39,7 @@ def test_video_models_exposes_supported_tasks() -> None:
         ]
     )
 
-    assert _video_models(session) == [
+    assert _models(session, "video") == [
         {
             "id": "t2v",
             "name": "Text model",
@@ -52,6 +52,78 @@ def test_video_models_exposes_supported_tasks() -> None:
             "provider": "wangp",
             "supportedTasks": ["image_to_video"],
         },
+    ]
+
+
+def test_models_exposes_image_tts_and_music_separately() -> None:
+    session = SimpleNamespace(
+        list_model_metadata=lambda: [
+            {
+                "model_type": "flux2",
+                "name": "Flux 2",
+                "main_output": ["image"],
+                "capabilities": {
+                    "text_to_image": True,
+                    "image_to_image": True,
+                },
+            },
+            {
+                "model_type": "qwen3_tts",
+                "name": "Qwen3 TTS",
+                "family": "tts",
+                "main_output": ["audio"],
+                "capabilities": {"text_to_audio": True},
+                "base_model_type": "qwen3_tts_base",
+                "media_inputs": {"audio": {"prompt": True}},
+                "setting_values": {
+                    "model_mode": {
+                        "label": "Language",
+                        "choices": [
+                            {"label": "English", "value": "English"},
+                            {"label": "Auto", "value": "auto"},
+                        ],
+                    }
+                },
+            },
+            {
+                "model_type": "ace_step",
+                "name": "ACE-Step",
+                "family": "music",
+                "main_output": ["audio"],
+                "capabilities": {"text_to_audio": True},
+            },
+        ]
+    )
+
+    assert _models(session, "image") == [
+        {
+            "id": "flux2",
+            "name": "Flux 2",
+            "provider": "wangp",
+            "supportedTasks": ["text_to_image", "image_to_image"],
+        }
+    ]
+    assert _models(session, "tts") == [
+        {
+            "id": "qwen3_tts",
+            "name": "Qwen3 TTS",
+            "provider": "wangp",
+            "languages": ["English", "auto"],
+            "capabilities": [
+                "text_to_speech",
+                "voice_cloning",
+                "reference_transcript",
+                "language_selection",
+            ],
+        }
+    ]
+    assert _models(session, "music") == [
+        {
+            "id": "ace_step",
+            "name": "ACE-Step",
+            "provider": "wangp",
+            "supportedTasks": ["text_to_music"],
+        }
     ]
 
 
@@ -101,11 +173,173 @@ def test_image_to_video_settings_use_input_path(tmp_path: Path) -> None:
     assert settings["video_length"] == "5s"
 
 
+def test_image_to_image_uses_reference_input_when_required(tmp_path: Path) -> None:
+    image = tmp_path / "input.png"
+    image.write_bytes(b"png")
+    settings = _settings(
+        {
+            "operation": "image_to_image",
+            "image_path": str(image),
+            "params": {
+                "model": "qwen_image_edit",
+                "prompt": "make it blue",
+                "targetWidth": 1024,
+                "targetHeight": 768,
+                "strength": 0.65,
+            },
+        },
+        {"media_inputs": {"image": {"reference": True}}},
+    )
+    assert settings["image_refs"] == [str(image.resolve())]
+    assert settings["resolution"] == "1024x768"
+    assert settings["denoising_strength"] == 0.65
+    assert settings["image_mode"] == 1
+
+
+def test_text_to_image_selects_image_output_for_dual_output_models() -> None:
+    settings = _settings(
+        {
+            "operation": "text_to_image",
+            "params": {"model": "t2v_2_2", "prompt": "sunrise"},
+        }
+    )
+    assert settings["image_mode"] == 1
+
+
+def test_image_to_image_uses_model_control_mode(tmp_path: Path) -> None:
+    image = tmp_path / "control.png"
+    image.write_bytes(b"png")
+    settings = _settings(
+        {
+            "operation": "image_to_image",
+            "image_path": str(image),
+            "params": {"model": "control-model", "prompt": "restyle"},
+        },
+        {
+            "media_inputs": {"image": {"control": True}},
+            "setting_values": {
+                "video_prompt_type": {
+                    "guide_preprocessing": {
+                        "choices": [
+                            {"label": "None", "value": ""},
+                            {"label": "Control image", "value": "V"},
+                        ]
+                    }
+                }
+            },
+        },
+    )
+    assert settings["image_guide"] == str(image.resolve())
+    assert settings["video_prompt_type"] == "V"
+
+
+def test_music_settings_map_lyrics_style_and_duration() -> None:
+    assert _settings(
+        {
+            "operation": "text_to_audio",
+            "params": {
+                "model": "ace_step_v1_5",
+                "prompt": "dreamy synth pop",
+                "lyrics": "[Verse]\nHello",
+                "durationSeconds": 30,
+                "seed": 5,
+            },
+        }
+    ) == {
+        "model_type": "ace_step_v1_5",
+        "prompt": "[Verse]\nHello",
+        "alt_prompt": "dreamy synth pop",
+        "duration_seconds": 30.0,
+        "seed": 5,
+    }
+
+
+def test_stable_audio_uses_description_as_its_main_prompt() -> None:
+    assert _settings(
+        {
+            "operation": "text_to_audio",
+            "params": {
+                "model": "stable_audio3_small",
+                "prompt": "soft rain and distant thunder",
+                "lyrics": "ignored lyrics",
+            },
+        },
+        {"base_model_type": "stable_audio3_small"},
+    ) == {
+        "model_type": "stable_audio3_small",
+        "prompt": "soft rain and distant thunder",
+    }
+
+
+def test_tts_settings_map_voice_clone_fields(tmp_path: Path) -> None:
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"wav")
+    assert _settings(
+        {
+            "operation": "tts_encoded",
+            "reference_audio_path": str(audio),
+            "params": {
+                "model": "qwen3_tts_base",
+                "text": "Hello",
+                "referenceText": "Reference words",
+                "language": "English",
+                "speed": 1.1,
+            },
+        }
+    ) == {
+        "model_type": "qwen3_tts_base",
+        "prompt": "Hello",
+        "alt_prompt": "Reference words",
+        "model_mode": "English",
+        "audio_guide": str(audio.resolve()),
+    }
+
+
+def test_tts_uses_voice_only_for_custom_voice_and_speed_only_for_index25() -> None:
+    custom_voice = _settings(
+        {
+            "operation": "tts_encoded",
+            "params": {
+                "model": "qwen3_tts_customvoice",
+                "text": "Hello",
+                "voice": "Ryan",
+                "language": "English",
+            },
+        },
+        {"base_model_type": "qwen3_tts_customvoice"},
+    )
+    assert custom_voice["model_mode"] == "Ryan"
+
+    index = _settings(
+        {
+            "operation": "tts_encoded",
+            "params": {
+                "model": "index_tts25",
+                "text": "Hello",
+                "voice": "unused",
+                "language": "EN",
+                "speed": 1.25,
+            },
+        },
+        {"base_model_type": "index_tts25"},
+    )
+    assert index["model_mode"] == "EN"
+    assert index["custom_settings"] == {"speech_speed": 1.25}
+
+
 def test_generated_path_requires_successful_existing_file(tmp_path: Path) -> None:
     video = tmp_path / "output.mp4"
     video.write_bytes(b"video")
     result = SimpleNamespace(success=True, generated_files=[str(video)], artifacts=[])
-    assert _generated_path(result) == str(video.resolve())
+    assert _generated_path(result, "video") == str(video.resolve())
+
+    image = tmp_path / "wrong.png"
+    image.write_bytes(b"image")
+    with pytest.raises(RuntimeError, match="without a generated media file"):
+        _generated_path(
+            SimpleNamespace(success=True, generated_files=[str(image)], artifacts=[]),
+            "video",
+        )
 
     with pytest.raises(RuntimeError, match="denied"):
         _generated_path(

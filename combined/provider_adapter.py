@@ -83,35 +83,104 @@ def _session(root: Path, callbacks: object | None = None) -> Any:
     )
 
 
-def _video_models(session: Any) -> list[dict[str, Any]]:
+_MODEL_TASKS = {
+    "video": ("text_to_video", "image_to_video"),
+    "image": ("text_to_image", "image_to_image"),
+}
+
+
+def _is_music(metadata: dict[str, Any]) -> bool:
+    return str(metadata.get("family") or "").casefold() == "music"
+
+
+def _choice_values(definition: Any) -> list[str]:
+    if not isinstance(definition, dict):
+        return []
+    values: list[str] = []
+    for choice in definition.get("choices", []):
+        value = choice.get("value") if isinstance(choice, dict) else choice
+        if value is not None and str(value):
+            values.append(str(value))
+    return values
+
+
+def _models(session: Any, model_kind: str) -> list[dict[str, Any]]:
+    """Translate WanGP model metadata into NodeTool provider models."""
+    if model_kind not in {"video", "image", "tts", "music"}:
+        return []
     models: list[dict[str, Any]] = []
     for metadata in session.list_model_metadata():
-        outputs = metadata.get("outputs", [])
-        if "video" not in outputs:
+        outputs = metadata.get("main_output", metadata.get("outputs", []))
+        expected_output = "audio" if model_kind in {"tts", "music"} else model_kind
+        if expected_output not in outputs:
+            continue
+        if model_kind == "music" and not _is_music(metadata):
+            continue
+        if model_kind == "tts" and _is_music(metadata):
             continue
         capabilities = metadata.get("capabilities", {})
-        supported = [
-            task
-            for task in ("text_to_video", "image_to_video")
-            if capabilities.get(task)
-        ]
+        if model_kind in _MODEL_TASKS:
+            supported = [
+                task for task in _MODEL_TASKS[model_kind] if capabilities.get(task)
+            ]
+        elif model_kind == "music":
+            supported = ["text_to_music"] if capabilities.get("text_to_audio") else []
+        else:
+            supported = ["text_to_speech"] if capabilities.get("text_to_audio") else []
         if not supported:
             continue
         model_type = str(metadata.get("model_type") or "").strip()
         if not model_type:
             continue
-        models.append(
-            {
-                "id": model_type,
-                "name": str(metadata.get("name") or model_type),
-                "provider": "wangp",
-                "supportedTasks": supported,
-            }
-        )
+        model = {
+            "id": model_type,
+            "name": str(metadata.get("name") or model_type),
+            "provider": "wangp",
+        }
+        if model_kind == "tts":
+            base_model_type = str(metadata.get("base_model_type") or model_type)
+            tts_capabilities = list(supported)
+            media_inputs = metadata.get("media_inputs")
+            audio_inputs = (
+                media_inputs.get("audio", {}) if isinstance(media_inputs, dict) else {}
+            )
+            if audio_inputs.get("prompt"):
+                tts_capabilities.append("voice_cloning")
+            if base_model_type in {"qwen3_tts_base", "omnivoice"}:
+                tts_capabilities.append("reference_transcript")
+            if base_model_type in {
+                "qwen3_tts_customvoice",
+                "index_tts2",
+                "index_tts25",
+            }:
+                tts_capabilities.append("instruction_control")
+            if base_model_type in {"qwen3_tts_voicedesign", "omnivoice"}:
+                tts_capabilities.append("voice_design")
+
+            setting_values = metadata.get("setting_values")
+            model_mode = (
+                setting_values.get("model_mode")
+                if isinstance(setting_values, dict)
+                else None
+            )
+            mode_label = str(
+                model_mode.get("label", "") if isinstance(model_mode, dict) else ""
+            ).casefold()
+            mode_values = _choice_values(model_mode)
+            if mode_label == "speaker":
+                tts_capabilities.append("preset_voice")
+                model["voices"] = mode_values
+            elif mode_label == "language":
+                tts_capabilities.append("language_selection")
+                model["languages"] = mode_values
+            model["capabilities"] = list(dict.fromkeys(tts_capabilities))
+        else:
+            model["supportedTasks"] = supported
+        models.append(model)
     return models
 
 
-def _settings(request: dict[str, Any]) -> dict[str, Any]:
+def _model_id(request: dict[str, Any]) -> str:
     params = request.get("params")
     if not isinstance(params, dict):
         raise ValueError("Provider generation requires params")
@@ -121,10 +190,42 @@ def _settings(request: dict[str, Any]) -> dict[str, Any]:
     model_type = str(model or "").strip()
     if not model_type:
         raise ValueError("Provider generation requires a model id")
+    return model_type
+
+
+def _input_path(request: dict[str, Any], name: str) -> Path:
+    path = Path(str(request.get(name) or "")).resolve()
+    if not path.is_file():
+        raise ValueError(f"{request.get('operation')} requires a readable {name}")
+    return path
+
+
+def _setting_choice_with_flag(
+    metadata: dict[str, Any] | None, setting: str, flag: str
+) -> str:
+    definitions = (metadata or {}).get("setting_values", {}).get(
+        "video_prompt_type", {}
+    )
+    choice_def = definitions.get(setting)
+    if not isinstance(choice_def, dict):
+        return ""
+    for choice in choice_def.get("choices", []):
+        value = choice.get("value", "") if isinstance(choice, dict) else ""
+        if flag in str(value):
+            return str(value)
+    return ""
+
+
+def _settings(
+    request: dict[str, Any], metadata: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    params = request["params"]
+    operation = str(request.get("operation") or "")
+    model_type = _model_id(request)
 
     settings: dict[str, Any] = {
         "model_type": model_type,
-        "prompt": str(params.get("prompt") or ""),
+        "prompt": str(params.get("text") or params.get("prompt") or ""),
     }
     mappings = {
         "negativePrompt": "negative_prompt",
@@ -132,22 +233,76 @@ def _settings(request: dict[str, Any]) -> dict[str, Any]:
         "guidanceScale": "guidance_scale",
         "numInferenceSteps": "num_inference_steps",
         "seed": "seed",
+        "fps": "force_fps",
+        "scheduler": "sample_solver",
+        "strength": "denoising_strength",
     }
     for source, target in mappings.items():
         value = params.get(source)
         if value is not None:
             settings[target] = value
+    if "resolution" not in settings:
+        width = params.get("width", params.get("targetWidth"))
+        height = params.get("height", params.get("targetHeight"))
+        if width is not None and height is not None:
+            settings["resolution"] = f"{int(width)}x{int(height)}"
     if params.get("numFrames") is not None:
         settings["video_length"] = int(params["numFrames"])
-    elif params.get("durationSeconds") is not None:
+    elif params.get("durationSeconds") is not None and operation.endswith("video"):
         settings["video_length"] = f"{float(params['durationSeconds']):g}s"
 
-    if request["operation"] == "image_to_video":
-        image_path = Path(str(request.get("image_path") or "")).resolve()
-        if not image_path.is_file():
-            raise ValueError("image_to_video requires a readable image_path")
-        settings["image_start"] = str(image_path)
-        settings["image_prompt_type"] = "S"
+    if operation in {"text_to_image", "image_to_image"}:
+        settings["image_mode"] = 1
+
+    if operation in {"image_to_image", "image_to_video"}:
+        image_path = str(_input_path(request, "image_path"))
+        image_inputs = (metadata or {}).get("media_inputs", {}).get("image", {})
+        if image_inputs.get("start") or operation == "image_to_video":
+            settings["image_start"] = image_path
+            settings["image_prompt_type"] = "S"
+        elif image_inputs.get("reference"):
+            settings["image_refs"] = [image_path]
+        elif image_inputs.get("control"):
+            settings["image_guide"] = image_path
+            control_mode = _setting_choice_with_flag(
+                metadata, "guide_preprocessing", "V"
+            ) or _setting_choice_with_flag(metadata, "guide_custom_choices", "V")
+            if control_mode:
+                settings["video_prompt_type"] = control_mode
+        else:
+            raise ValueError(f"Model {model_type} does not accept an input image")
+
+    if operation == "text_to_audio":
+        style_prompt = str(params.get("prompt") or "")
+        lyrics = str(params.get("lyrics") or "").strip()
+        base_model_type = str((metadata or {}).get("base_model_type") or model_type)
+        if base_model_type.startswith("stable_audio3"):
+            settings["prompt"] = style_prompt
+        else:
+            settings["prompt"] = lyrics or "[Instrumental]"
+            settings["alt_prompt"] = style_prompt
+        if params.get("durationSeconds") is not None:
+            settings["duration_seconds"] = float(params["durationSeconds"])
+
+    if operation == "tts_encoded":
+        if params.get("referenceText") is not None:
+            settings["alt_prompt"] = str(params["referenceText"])
+        elif params.get("instructions") is not None:
+            settings["alt_prompt"] = str(params["instructions"])
+        base_model_type = str((metadata or {}).get("base_model_type") or model_type)
+        model_mode = (
+            params.get("voice")
+            if base_model_type == "qwen3_tts_customvoice"
+            else params.get("language")
+        )
+        if model_mode:
+            settings["model_mode"] = str(model_mode)
+        if params.get("speed") is not None and base_model_type == "index_tts25":
+            settings["custom_settings"] = {"speech_speed": float(params["speed"])}
+        if request.get("reference_audio_path"):
+            settings["audio_guide"] = str(
+                _input_path(request, "reference_audio_path")
+            )
     return settings
 
 
@@ -168,19 +323,30 @@ class _Callbacks:
         )
 
 
-def _generated_path(result: Any) -> str:
+def _generated_path(result: Any, media_type: str | None = None) -> str:
     if not getattr(result, "success", False):
         errors = getattr(result, "errors", ())
         detail = "; ".join(str(error) for error in errors) or "generation failed"
         raise RuntimeError(detail)
-    for path in getattr(result, "generated_files", ()):
-        candidate = Path(str(path))
-        if candidate.is_file():
-            return str(candidate.resolve())
     for artifact in getattr(result, "artifacts", ()):
+        if media_type and getattr(artifact, "media_type", None) != media_type:
+            continue
         path = getattr(artifact, "path", None)
         if path and Path(path).is_file():
             return str(Path(path).resolve())
+    media_suffixes = {
+        "image": {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"},
+        "video": {".avi", ".mkv", ".mov", ".mp4", ".webm"},
+        "audio": {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"},
+    }
+    expected_suffixes = media_suffixes.get(media_type or "")
+    for path in getattr(result, "generated_files", ()):
+        candidate = Path(str(path))
+        if candidate.is_file() and (
+            expected_suffixes is None
+            or candidate.suffix.casefold() in expected_suffixes
+        ):
+            return str(candidate.resolve())
     raise RuntimeError("WanGP completed without a generated media file")
 
 
@@ -196,14 +362,24 @@ def main() -> int:
     with contextlib.redirect_stdout(sys.stderr):
         if operation == "models":
             model_type = str(request.get("model_type") or "")
-            models = _video_models(_session(root)) if model_type == "video" else []
+            models = _models(_session(root), model_type)
             emitter.send("result", {"models": models})
             return 0
-        if operation not in {"text_to_video", "image_to_video"}:
+        media_type = {
+            "text_to_image": "image",
+            "image_to_image": "image",
+            "text_to_video": "video",
+            "image_to_video": "video",
+            "text_to_audio": "audio",
+            "tts_encoded": "audio",
+        }.get(operation)
+        if media_type is None:
             raise ValueError(f"Unsupported provider operation: {operation}")
         callbacks = _Callbacks(emitter)
-        result = _session(root, callbacks).run_task(_settings(request))
-        emitter.send("result", {"path": _generated_path(result)})
+        session = _session(root, callbacks)
+        metadata = session.get_model_metadata(_model_id(request))
+        result = session.run_task(_settings(request, metadata))
+        emitter.send("result", {"path": _generated_path(result, media_type)})
     return 0
 
 

@@ -5,9 +5,9 @@ ARG CORE_IMAGE=ghcr.io/nodetool-ai/nodetool:latest
 FROM ${CORE_IMAGE}
 
 ARG NODETOOL_CORE_REPOSITORY=https://github.com/nodetool-ai/nodetool-core.git
-ARG NODETOOL_CORE_COMMIT=cb6185b6abc78fc27260e963e7f2994818c128e3
+ARG NODETOOL_CORE_COMMIT=2f5c2519d9e46b38975c349c8467e41e053ed0e8
 ARG WANGP_REPOSITORY=https://github.com/deepbeepmeep/Wan2GP.git
-ARG WANGP_COMMIT=057f9ecab9ad57dfbec9768b2daf7a4426ce986c
+ARG WANGP_COMMIT=362c3467a70e1136ceb52eec95907205a8f88543
 ARG MMGP_REPOSITORY=https://github.com/deepbeepmeep/mmgp.git
 ARG MMGP_COMMIT=589ba050d320c4df879f48d11b23d6a88e6c68c8
 
@@ -15,8 +15,8 @@ LABEL org.opencontainers.image.title="NodeTool WanGP non-commercial GPU worker" 
       org.opencontainers.image.description="Authenticated direct-Python WanGP provider worker; free non-monetized evaluation only" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later AND LicenseRef-WanGP-Community-2.0 AND LicenseRef-mmGP-NonCommercial" \
       org.opencontainers.image.source="https://github.com/nodetool-ai/nodetool-wan2gp" \
-      io.nodetool.core.commit="cb6185b6abc78fc27260e963e7f2994818c128e3" \
-      io.nodetool.wangp.commit="057f9ecab9ad57dfbec9768b2daf7a4426ce986c" \
+      io.nodetool.core.commit="2f5c2519d9e46b38975c349c8467e41e053ed0e8" \
+      io.nodetool.wangp.commit="362c3467a70e1136ceb52eec95907205a8f88543" \
       io.nodetool.mmgp.commit="589ba050d320c4df879f48d11b23d6a88e6c68c8" \
       io.nodetool.commercial-use="prohibited-without-separate-written-license"
 
@@ -89,7 +89,7 @@ ENV WANGP_CONFIG_DIR=/workspace/wan2gp/config \
     WANGP_ROOT=/opt/Wan2GP \
     NODETOOL_MODEL_PREPARE_COMMAND_WANGP="/opt/wan2gp-venv/bin/python /opt/nodetool-wan2gp-combined/prepare_model.py" \
     NODETOOL_PROVIDER_ADAPTER_COMMAND_WANGP="/opt/wan2gp-venv/bin/python /opt/nodetool-wan2gp-combined/provider_adapter.py" \
-    NODETOOL_PROVIDER_ADAPTER_CAPABILITIES_WANGP="text_to_video,image_to_video" \
+    NODETOOL_PROVIDER_ADAPTER_CAPABILITIES_WANGP="text_to_video,image_to_video,text_to_image,image_to_image,text_to_audio,text_to_speech_encoded" \
     NODETOOL_PROVIDER_ADAPTER_DISPLAY_NAME_WANGP="WanGP" \
     HF_HOME=/workspace/cache/huggingface \
     PYTHONUNBUFFERED=1 \
