@@ -22,6 +22,16 @@ continues with `stalled: true`; the worker does not abort automatically.
 The combined Dockerfile pins the NodeTool worker revision that implements this
 protocol so it does not depend on when the moving base image is rebuilt.
 
+The same worker advertises WanGP as a provider with video model discovery,
+`text_to_video`, and `image_to_video` capabilities. These requests launch a
+short-lived adapter in WanGP's isolated interpreter and call its public
+in-process API directly. Model identifiers and capabilities come from the
+pinned WanGP runtime. Encoded inputs cross the interpreter boundary through a
+worker-owned temporary file; the adapter returns an output path and the worker
+streams the resulting video bytes over its existing authenticated protocol.
+WanGP progress callbacks are relayed as provider progress frames. No WanGP code
+is imported into the NodeTool environment and no upstream source is modified.
+
 ## Runtime configuration
 
 Starting the container requires both:
