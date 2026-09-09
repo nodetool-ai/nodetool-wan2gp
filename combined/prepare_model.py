@@ -29,13 +29,33 @@ def _read_request() -> dict[str, Any]:
 
 class _Emitter:
     def __init__(self) -> None:
-        self._stream = sys.stdout
+        try:
+            # Preserve the protocol pipe before fd 1 is redirected. Some
+            # upstream/native download code writes directly to the descriptor
+            # and therefore bypasses contextlib.redirect_stdout.
+            self._stream = os.fdopen(
+                os.dup(sys.stdout.fileno()),
+                "w",
+                encoding="utf-8",
+                buffering=1,
+            )
+        except (AttributeError, OSError):
+            self._stream = sys.stdout
         self._lock = threading.Lock()
 
     def send(self, payload: dict[str, object]) -> None:
         with self._lock:
             self._stream.write(json.dumps(payload, separators=(",", ":")) + "\n")
             self._stream.flush()
+
+
+def _reserve_stdout_for_protocol() -> None:
+    """Route ordinary and low-level upstream stdout writes to stderr."""
+    try:
+        sys.stdout.flush()
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    except (AttributeError, OSError):
+        pass
 
 
 def _configure_wangp_root() -> Path:
@@ -146,6 +166,7 @@ def _prepare(runtime: Any, model_type: str) -> None:
 def main() -> int:
     emitter = _Emitter()
     request = _read_request()
+    _reserve_stdout_for_protocol()
     wangp_root = _configure_wangp_root()
     model_type = str(request.get("model_type") or "").strip()
     if not model_type:
