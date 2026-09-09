@@ -73,6 +73,17 @@ def test_models_exposes_image_tts_and_music_separately() -> None:
                 "family": "tts",
                 "main_output": ["audio"],
                 "capabilities": {"text_to_audio": True},
+                "base_model_type": "qwen3_tts_base",
+                "media_inputs": {"audio": {"prompt": True}},
+                "setting_values": {
+                    "model_mode": {
+                        "label": "Language",
+                        "choices": [
+                            {"label": "English", "value": "English"},
+                            {"label": "Auto", "value": "auto"},
+                        ],
+                    }
+                },
             },
             {
                 "model_type": "ace_step",
@@ -97,7 +108,13 @@ def test_models_exposes_image_tts_and_music_separately() -> None:
             "id": "qwen3_tts",
             "name": "Qwen3 TTS",
             "provider": "wangp",
-            "capabilities": ["text_to_speech"],
+            "languages": ["English", "auto"],
+            "capabilities": [
+                "text_to_speech",
+                "voice_cloning",
+                "reference_transcript",
+                "language_selection",
+            ],
         }
     ]
     assert _models(session, "music") == [
@@ -176,6 +193,17 @@ def test_image_to_image_uses_reference_input_when_required(tmp_path: Path) -> No
     assert settings["image_refs"] == [str(image.resolve())]
     assert settings["resolution"] == "1024x768"
     assert settings["denoising_strength"] == 0.65
+    assert settings["image_mode"] == 1
+
+
+def test_text_to_image_selects_image_output_for_dual_output_models() -> None:
+    settings = _settings(
+        {
+            "operation": "text_to_image",
+            "params": {"model": "t2v_2_2", "prompt": "sunrise"},
+        }
+    )
+    assert settings["image_mode"] == 1
 
 
 def test_image_to_image_uses_model_control_mode(tmp_path: Path) -> None:
@@ -226,6 +254,23 @@ def test_music_settings_map_lyrics_style_and_duration() -> None:
     }
 
 
+def test_stable_audio_uses_description_as_its_main_prompt() -> None:
+    assert _settings(
+        {
+            "operation": "text_to_audio",
+            "params": {
+                "model": "stable_audio3_small",
+                "prompt": "soft rain and distant thunder",
+                "lyrics": "ignored lyrics",
+            },
+        },
+        {"base_model_type": "stable_audio3_small"},
+    ) == {
+        "model_type": "stable_audio3_small",
+        "prompt": "soft rain and distant thunder",
+    }
+
+
 def test_tts_settings_map_voice_clone_fields(tmp_path: Path) -> None:
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"wav")
@@ -246,9 +291,40 @@ def test_tts_settings_map_voice_clone_fields(tmp_path: Path) -> None:
         "prompt": "Hello",
         "alt_prompt": "Reference words",
         "model_mode": "English",
-        "speech_speed": 1.1,
         "audio_guide": str(audio.resolve()),
     }
+
+
+def test_tts_uses_voice_only_for_custom_voice_and_speed_only_for_index25() -> None:
+    custom_voice = _settings(
+        {
+            "operation": "tts_encoded",
+            "params": {
+                "model": "qwen3_tts_customvoice",
+                "text": "Hello",
+                "voice": "Ryan",
+                "language": "English",
+            },
+        },
+        {"base_model_type": "qwen3_tts_customvoice"},
+    )
+    assert custom_voice["model_mode"] == "Ryan"
+
+    index = _settings(
+        {
+            "operation": "tts_encoded",
+            "params": {
+                "model": "index_tts25",
+                "text": "Hello",
+                "voice": "unused",
+                "language": "EN",
+                "speed": 1.25,
+            },
+        },
+        {"base_model_type": "index_tts25"},
+    )
+    assert index["model_mode"] == "EN"
+    assert index["custom_settings"] == {"speech_speed": 1.25}
 
 
 def test_generated_path_requires_successful_existing_file(tmp_path: Path) -> None:
@@ -256,6 +332,14 @@ def test_generated_path_requires_successful_existing_file(tmp_path: Path) -> Non
     video.write_bytes(b"video")
     result = SimpleNamespace(success=True, generated_files=[str(video)], artifacts=[])
     assert _generated_path(result, "video") == str(video.resolve())
+
+    image = tmp_path / "wrong.png"
+    image.write_bytes(b"image")
+    with pytest.raises(RuntimeError, match="without a generated media file"):
+        _generated_path(
+            SimpleNamespace(success=True, generated_files=[str(image)], artifacts=[]),
+            "video",
+        )
 
     with pytest.raises(RuntimeError, match="denied"):
         _generated_path(
