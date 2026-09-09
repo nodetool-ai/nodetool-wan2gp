@@ -1,15 +1,12 @@
 # Combined image worker and secrets boundary
 
-The combined image is a GPU execution worker, not a NodeTool main process. It
-runs two processes:
+The combined image is a provider-only GPU execution worker, not a NodeTool main
+process. It runs one long-lived process: the authenticated NodeTool Python
+WebSocket worker on port 7777.
 
-1. WanGP's MCP server on IPv4 loopback only.
-2. The NodeTool Python WebSocket worker on port 7777.
-
-The image does not start the TypeScript backend, open a NodeTool database, use
-the desktop keychain, or create/read a `SECRETS_MASTER_KEY`. The loopback MCP
-URL is internal plumbing between the Python node package and WanGP; it is not a
-second public service.
+The image does not start WanGP's MCP server, install the legacy Wan2GP node
+package, start the TypeScript backend, open a NodeTool database, use the desktop
+keychain, or create/read a `SECRETS_MASTER_KEY`.
 
 The worker also advertises the `wangp` model-preparation backend. A
 `models.prepare` request launches a short-lived adapter in WanGP's isolated
@@ -41,8 +38,7 @@ Starting the container requires both:
 - a strong, random `NODETOOL_WORKER_TOKEN`, shared with the external NodeTool
   main process and used to authenticate the WebSocket connection.
 
-Only port 7777 should be exposed. WanGP's port 7866 must remain private inside
-the container.
+Only port 7777 is used or exposed. There is no internal WanGP HTTP service.
 
 ## Request-scoped secrets
 

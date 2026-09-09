@@ -1,3 +1,6 @@
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -88,3 +91,26 @@ def test_prepare_calls_wangp_downloads_without_loading_model() -> None:
         ("https://example.test/module-b.safetensors", 1, 2),
         ("https://example.test/text.safetensors", 2, -1),
     ]
+
+
+def test_prepare_adapter_reserves_stdout_for_json_protocol() -> None:
+    root = Path(__file__).resolve().parents[1]
+    code = """
+import os
+from combined.prepare_model import _Emitter, _reserve_stdout_for_protocol
+
+emitter = _Emitter()
+_reserve_stdout_for_protocol()
+os.write(1, b"upstream noise\\n")
+emitter.send({"status": "completed"})
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(root)},
+        check=True,
+    )
+    assert json.loads(result.stdout) == {"status": "completed"}
+    assert "upstream noise" in result.stderr

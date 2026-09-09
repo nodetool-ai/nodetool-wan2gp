@@ -12,7 +12,7 @@ ARG MMGP_REPOSITORY=https://github.com/deepbeepmeep/mmgp.git
 ARG MMGP_COMMIT=589ba050d320c4df879f48d11b23d6a88e6c68c8
 
 LABEL org.opencontainers.image.title="NodeTool WanGP non-commercial GPU worker" \
-      org.opencontainers.image.description="Authenticated Python execution worker and private WanGP MCP; free non-monetized evaluation only" \
+      org.opencontainers.image.description="Authenticated direct-Python WanGP provider worker; free non-monetized evaluation only" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later AND LicenseRef-WanGP-Community-2.0 AND LicenseRef-mmGP-NonCommercial" \
       org.opencontainers.image.source="https://github.com/nodetool-ai/nodetool-wan2gp" \
       io.nodetool.core.commit="cb6185b6abc78fc27260e963e7f2994818c128e3" \
@@ -33,8 +33,8 @@ RUN apt-get update \
 RUN /opt/venv/bin/python -m pip install --no-deps \
     "git+${NODETOOL_CORE_REPOSITORY}@${NODETOOL_CORE_COMMIT}"
 
-# WanGP deliberately lives in a separate environment. Its pinned MCP and
-# Pydantic versions conflict with the NodeTool environment.
+# WanGP deliberately lives in a separate environment because its pinned
+# dependencies conflict with the NodeTool environment.
 RUN /opt/venv/bin/python -m venv --copies /opt/wan2gp-venv \
     && /opt/wan2gp-venv/bin/python -m pip install --upgrade pip setuptools wheel \
     && /opt/wan2gp-venv/bin/python -m pip install \
@@ -63,10 +63,7 @@ RUN mkdir -p /opt/licenses/mmgp \
     && rm -rf /tmp/mmgp-license
 
 COPY . /tmp/nodetool-wan2gp
-RUN /opt/venv/bin/python -m pip install \
-        --index-url https://pypi.org/simple \
-        /tmp/nodetool-wan2gp \
-    && mkdir -p /opt/licenses/nodetool-wan2gp \
+RUN mkdir -p /opt/licenses/nodetool-wan2gp \
     && cp /tmp/nodetool-wan2gp/NOTICE.md /opt/licenses/nodetool-wan2gp/NOTICE.md \
     && cp /tmp/nodetool-wan2gp/docs/combined-image-licenses.md \
         /opt/licenses/nodetool-wan2gp/combined-image-licenses.md \
@@ -85,8 +82,7 @@ RUN chmod 0755 /usr/local/bin/nodetool-wangp-entrypoint \
         /workspace/wan2gp/outputs /workspace/cache \
     && ln -s /workspace/wan2gp/models /opt/Wan2GP/ckpts
 
-ENV WAN2GP_MCP_URL=http://127.0.0.1:7866/mcp \
-    WANGP_CONFIG_DIR=/workspace/wan2gp/config \
+ENV WANGP_CONFIG_DIR=/workspace/wan2gp/config \
     WANGP_MODEL_DIR=/workspace/wan2gp/models \
     WANGP_OUTPUT_DIR=/workspace/wan2gp/outputs \
     WANGP_ROOT=/opt/Wan2GP \
