@@ -29,8 +29,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Pin the worker protocol implementation independently of the moving base
-# image. Dependencies already come from CORE_IMAGE.
-RUN /opt/venv/bin/python -m pip install --no-deps \
+# image and install its declared runtime dependencies. The base image does not
+# guarantee that the Python worker environment is already populated.
+RUN /opt/venv/bin/python -m pip install \
     "git+${NODETOOL_CORE_REPOSITORY}@${NODETOOL_CORE_COMMIT}"
 
 # WanGP deliberately lives in a separate environment because its pinned

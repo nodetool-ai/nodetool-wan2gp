@@ -27,3 +27,11 @@ def test_combined_image_has_no_mcp_service() -> None:
     assert "7866" not in runtime
     assert "shared.mcp_server" not in runtime
     assert "pip install" not in DOCKERFILE.split("COPY . /tmp/nodetool-wan2gp", 1)[1]
+
+
+def test_combined_image_installs_worker_runtime_dependencies() -> None:
+    core_install = DOCKERFILE.split(
+        "# Pin the worker protocol implementation", 1
+    )[1].split("# WanGP deliberately lives", 1)[0]
+    assert "pip install" in core_install
+    assert "--no-deps" not in core_install
