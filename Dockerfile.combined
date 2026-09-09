@@ -40,7 +40,7 @@ RUN /opt/venv/bin/python -m venv --copies /opt/wan2gp-venv \
     && /opt/wan2gp-venv/bin/python -m pip install --upgrade pip setuptools wheel \
     && /opt/wan2gp-venv/bin/python -m pip install \
         torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
-        --index-url https://download.pytorch.org/whl/cu130
+        --index-url https://download.pytorch.org/whl/cu128
 
 RUN git clone --filter=blob:none "${WANGP_REPOSITORY}" /opt/Wan2GP \
     && git -C /opt/Wan2GP fetch --depth 1 origin "${WANGP_COMMIT}" \

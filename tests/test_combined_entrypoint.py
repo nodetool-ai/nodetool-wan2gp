@@ -35,3 +35,6 @@ def test_combined_image_installs_worker_runtime_dependencies() -> None:
     )[1].split("# WanGP deliberately lives", 1)[0]
     assert "pip install" in core_install
     assert "--no-deps" not in core_install
+def test_combined_image_uses_a40_compatible_pytorch_wheels() -> None:
+    assert "https://download.pytorch.org/whl/cu128" in DOCKERFILE
+    assert "https://download.pytorch.org/whl/cu130" not in DOCKERFILE
