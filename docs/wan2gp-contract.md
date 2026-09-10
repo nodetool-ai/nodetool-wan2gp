@@ -50,6 +50,14 @@ The media transfer routes live on the same origin, one level up from `/mcp`:
 (`shared/mcp_server.py:1129`, `:1163`). Both tools return **relative** URLs, so a
 client must resolve them against the MCP server origin (`docs/API.md:391`).
 
+This package uses a safe 512 MiB default limit for each media transfer. The
+shared node field `max_media_bytes` lets a workflow lower or raise that limit,
+validated from 1 byte through the explicit 8 GiB client ceiling. The HTTP
+operation timeout remains 30 seconds, while the MCP SSE read timeout is at least
+300 seconds (or the node's generation timeout) so a long generation does not
+close an otherwise healthy session. The outer generation deadline still bounds
+job polling.
+
 ## `wangp_generate(source, wait=False, timeout_s=None, event_limit=None)`
 
 Declared at `shared/mcp_server.py:1513`.
@@ -206,7 +214,9 @@ Returns:
 `GET` on that URL streams the file with its guessed content type
 (`shared/mcp_server.py:1163-1170`). The token is one-use and the media must already
 be registered in a gallery; an unknown `media_id` raises `KeyError`
-(`shared/mcp_server.py:390`).
+(`shared/mcp_server.py:390`). The client streams the response into a bounded
+spooled temporary file, enforcing the effective ticket/node limit on both the
+advertised length and live chunks, then reads the bytes once for NodeTool.
 
 ## `wangp_models(query, filters, limit, offset)`
 
@@ -308,7 +318,26 @@ that support cancellation override the property. Cancellation is cooperative, so
 a node must call `raise_if_cancelled()` inside its own loop.
 
 The nodes in this package call it once per poll and, when it raises, send
-`wangp_cancel_job` before letting `NodeCancelledError` propagate.
+`wangp_cancel_job` before letting `NodeCancelledError` propagate. The node's
+`timeout_seconds` is an overall generation deadline, not an HTTP request
+timeout: each MCP/media request uses a short 30-second timeout, and each poll
+ is bounded by the remaining generation deadline. A timeout or poll failure
+ triggers a bounded best-effort `wangp_cancel_job` request.
+
+## Output media and transfer safety
+
+The first `gallery_items` entry determines the output. `Generate` dispatches
+its bytes to `image_from_bytes`, `video_from_bytes`, or `audio_from_bytes` based
+on the entry's validated `media_type` (`image`, `video`, or `audio`). The
+TextToVideo and ImageToVideo nodes require `media_type="video"` and reject
+other output types.
+
+Upload and download tickets must provide relative URLs under the matching
+`/wangp_api/gallery/{upload,download}/` route on the MCP server's origin. The
+client requires PUT for uploads and GET for downloads, disables redirects, and
+rejects non-2xx responses. Transfers are bounded by the ticket's `max_bytes` or
+`size` value and a hard 8 GiB cap (with a configurable lower client limit);
+downloads enforce the limit from Content-Length and while streaming bytes.
 
 ## Still unconfirmed
 
