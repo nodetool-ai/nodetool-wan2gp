@@ -20,10 +20,9 @@ USER root
 
 # Install this pack from the build context on top of core.
 COPY . /tmp/nodetool-wan2gp
-RUN uv pip install \
-        --python $VIRTUAL_ENV \
+RUN /opt/venv/bin/python -m pip install \
         --index-url https://pypi.org/simple \
         /tmp/nodetool-wan2gp \
-    && rm -rf /tmp/nodetool-wan2gp /root/.cache/uv /root/.cache/pip /tmp/* /var/tmp/*
+    && rm -rf /tmp/nodetool-wan2gp /root/.cache/pip /tmp/* /var/tmp/*
 
 # EXPOSE 7777, HEALTHCHECK, and CMD are all inherited from the core image.
