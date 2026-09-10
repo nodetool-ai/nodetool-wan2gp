@@ -1,7 +1,7 @@
 # The Wan2GP MCP contract this package depends on
 
 Every item below was resolved by reading the Wan2GP source at commit
-`057f9ecab9ad57dfbec9768b2daf7a4426ce986c` (2026-09-06). **None of it was
+`362c3467a70e1136ceb52eec95907205a8f88543`. **None of it was
 confirmed against a live server.** There was no Wan2GP instance and no GPU on
 the machine where this package was written. Treat each shape as source-derived
 until someone runs `scripts/smoke.py` against a real server.
@@ -320,3 +320,19 @@ The nodes in this package call it once per poll and, when it raises, send
 - Which `model_type` ids a particular install exposes. `defaults/` is the
   registry, and a user can add finetunes under `finetunes/`
   (`wgp.py:3281`).
+
+## Reference video adapter
+
+The combined worker targets WanGP commit `362c3467a70e1136ceb52eec95907205a8f88543`.
+Reference support is discovered from `session.list_model_metadata()`. The
+adapter uses the pinned metadata fields `media_inputs.image.reference` (or its
+single or multiple reference roles), `media_inputs.video.control`, and the
+declared `setting_values` choices for `image_ref_choices`,
+`guide_custom_choices`, and `audio_prompt_type.sources`.
+
+Reference images are sent as ordered `image_refs`. One or two reference videos
+are sent as `video_guide` and `video_guide2`, selecting the advertised `V-U` or
+`V+-U` mode. WanGP's `GV` choice is generic control video and is excluded.
+Unsupported media kinds, counts, missing models, and missing task
+support fail before `run_task`. Audio is enabled only when a reference video
+is present and WanGP advertises a `K` audio source choice.

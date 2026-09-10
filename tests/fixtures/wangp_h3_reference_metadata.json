@@ -1,0 +1,194 @@
+{
+  "model_type": "minimax_h3_ref2va_pruned_pdd",
+  "family": "unknown",
+  "family_label": "Unknown",
+  "base_model_type": "minimax_h3_ref2va_pruned_pdd",
+  "finetune": false,
+  "main_output": [
+    "video"
+  ],
+  "outputs": [
+    "video",
+    "audio"
+  ],
+  "inputs": [
+    "text",
+    "audio",
+    "image",
+    "video"
+  ],
+  "media_inputs": {
+    "image": {
+      "start": true,
+      "end": true,
+      "reference": true,
+      "single_reference": false,
+      "multiple_references": true,
+      "background": true,
+      "injected_frames": false,
+      "control": false,
+      "mask": false
+    },
+    "video": {
+      "continue": true,
+      "last": true,
+      "control": true,
+      "mask": true
+    },
+    "audio": {
+      "prompt": true,
+      "output": true
+    }
+  },
+  "capabilities": {
+    "text_to_video": true,
+    "image_to_video": true,
+    "video_to_video": true,
+    "text_to_image": false,
+    "image_to_image": false,
+    "text_to_audio": false,
+    "audio_to_audio": false,
+    "audio_to_video": true,
+    "audio_output": true,
+    "inpainting": true,
+    "outpainting": false,
+    "reference_images": true,
+    "background_image": true,
+    "injected_frames": false,
+    "control_image": false,
+    "control_video": true,
+    "video_continuation": true,
+    "sliding_window": true,
+    "lora": true
+  },
+  "setting_values": {
+    "image_prompt_type": {
+      "allowed": "TSEVL",
+      "choices": [
+        {
+          "label": "Text/new generation",
+          "value": ""
+        },
+        {
+          "label": "Start image",
+          "value": "S"
+        },
+        {
+          "label": "End image",
+          "value": "E"
+        },
+        {
+          "label": "Continue from source video",
+          "value": "V"
+        },
+        {
+          "label": "Continue from last generated video",
+          "value": "L"
+        }
+      ]
+    },
+    "video_prompt_type": {
+      "guide_preprocessing": null,
+      "mask_preprocessing": {
+        "choices": [
+          {
+            "label": "None",
+            "value": ""
+          },
+          {
+            "label": "A",
+            "value": "A"
+          },
+          {
+            "label": "NA",
+            "value": "NA"
+          }
+        ]
+      },
+      "guide_custom_choices": {
+        "default": "",
+        "label": "Reference / Control Video",
+        "letters_filter": "GPDEV+-U",
+        "choices": [
+          {
+            "label": "Generate without a Reference or Control Video",
+            "value": ""
+          },
+          {
+            "label": "Use One Reference Video",
+            "value": "V-U"
+          },
+          {
+            "label": "Use Two Reference Videos",
+            "value": "V+-U"
+          },
+          {
+            "label": "Transfer Depth Map From Control Video",
+            "value": "DV"
+          },
+          {
+            "label": "Provide Generic Control Video",
+            "value": "GV"
+          }
+        ]
+      },
+      "image_ref_choices": {
+        "default": "",
+        "label": "Reference Images",
+        "letters_filter": "KI",
+        "choices": [
+          {
+            "label": "Generate without Reference Images",
+            "value": ""
+          },
+          {
+            "label": "Use Reference Images",
+            "value": "I"
+          },
+          {
+            "label": "First Reference Image is the Main Subject / Landscape, defines Output Dimensions, and may be followed by other Reference Images",
+            "value": "KI"
+          }
+        ]
+      },
+      "custom_video_selection": null,
+      "forced": ""
+    },
+    "audio_prompt_type": {
+      "sources": {
+        "default": "",
+        "label": "Audio References",
+        "letters_filter": "ABK",
+        "show_label": true,
+        "choices": [
+          {
+            "label": "Generate without an Audio Reference",
+            "value": ""
+          },
+          {
+            "label": "Use One Audio Reference",
+            "value": "A"
+          },
+          {
+            "label": "Use Two Audio References",
+            "value": "AB"
+          },
+          {
+            "label": "Use Reference-Video Soundtrack(s)",
+            "value": "K"
+          }
+        ]
+      },
+      "custom_option": null
+    },
+    "model_mode": null,
+    "sample_solver": null,
+    "prompt_enhancer": null
+  },
+  "source_commit": "362c3467a70e1136ceb52eec95907205a8f88543",
+  "source_files": {
+    "models/minimax_h3/minimax_h3_handler.py": "8b540668be0fdde0602ee58aaa36e6bdf4331db95047b5f5ddcd2972b32ae2d5",
+    "models/model_metadata.py": "62ba456904614cb299cd8af87a197bc531031c80ab557c2fdf09af57d66ec71d"
+  },
+  "extraction": "Reference-mode model definition extracted from the handler AST and normalized with store_metadata. returns_audio comes from the common handler definition."
+}
