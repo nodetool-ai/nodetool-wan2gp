@@ -26,11 +26,30 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install pytest pytest-asyncio
+          pip install build pytest pytest-asyncio
 
       - name: Check the license boundary
         run: |
           ! grep -rn "shared.api\|import wgp\|mmgp" src tests scripts
 
+      - name: Verify generated package metadata
+        run: |
+          nodetool-pkg scan --write
+          git diff --exit-code -- src/nodetool/package_metadata/nodetool-wan2gp.json
+
       - name: Run pytest
         run: pytest -q
+
+      - name: Build and inspect distributions
+        run: |
+          rm -rf dist
+          python -m build
+          ! tar -tzf dist/*.tar.gz | grep -E '(^|/)(\.env($|\.|/)|\.pi-subagents/)'
+          ! unzip -l dist/*.whl | grep -E '(^|/)(\.env($|\.|/)|\.pi-subagents/)'
+
+      - name: Test the wheel in an isolated environment
+        run: |
+          python -m venv /tmp/wan2gp-wheel-check
+          /tmp/wan2gp-wheel-check/bin/pip install dist/*.whl pytest pytest-asyncio
+          /tmp/wan2gp-wheel-check/bin/python -c 'import nodetool.nodes.wan2gp'
+          /tmp/wan2gp-wheel-check/bin/python -m pytest -q --ignore=tests/test_package_scan.py
