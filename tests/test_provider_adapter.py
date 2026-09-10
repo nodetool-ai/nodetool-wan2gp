@@ -22,6 +22,9 @@ REFERENCE_METADATA = json.loads(
         Path(__file__).parent / "fixtures" / "wangp_h3_reference_metadata.json"
     ).read_text()
 )
+FL2VA_METADATA = json.loads(
+    (Path(__file__).parent / "fixtures" / "wangp_h3_fl2va_metadata.json").read_text()
+)
 
 
 def test_video_models_exposes_supported_tasks() -> None:
@@ -658,6 +661,14 @@ def test_reference_discovery_excludes_control_and_start_only_models() -> None:
             0
         ]["supportedTasks"]
     )
+
+
+def test_reference_discovery_excludes_fl2va_frame_injection() -> None:
+    model = _models(
+        SimpleNamespace(list_model_metadata=lambda: [FL2VA_METADATA]), "video"
+    )[0]
+
+    assert model["supportedTasks"] == ["text_to_video", "image_to_video"]
 
 
 @pytest.mark.parametrize("field", ["reference_image_paths", "reference_video_paths"])

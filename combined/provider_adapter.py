@@ -131,7 +131,7 @@ def _media_roles(metadata: dict[str, Any] | None, kind: str) -> dict[str, Any]:
 def _reference_modes(metadata: dict[str, Any] | None) -> list[str]:
     image_modes = _choice_values(_setting_definition(metadata, "image_ref_choices"))
     image_modes += _choice_values(_setting_definition(metadata, "guide_custom_choices"))
-    return [value for value in image_modes if "I" in value]
+    return [value for value in image_modes if "I" in value and "F" not in value]
 
 
 def _video_reference_modes(metadata: dict[str, Any] | None) -> list[str]:
