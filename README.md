@@ -7,12 +7,12 @@ model ever loads inside the NodeTool process.
 ## License boundary
 
 This package is AGPL-3.0-or-later, because it subclasses `BaseNode` from
-`nodetool-core`. Wan2GP is a separate program under the proprietary WanGP
-Community License 2.0, and its memory manager `mmgp` is licensed for
-non-commercial use only, so this package never imports either one. You may run
-Wan2GP locally and use it for client work, but selling it, white-labelling it,
-or offering paid API, SaaS, or hosted access to it needs a separate license from
-its author; see [NOTICE.md](NOTICE.md).
+`nodetool-core`. WanGP is separately licensed under the WanGP Community License
+2.0, and `mmgp` permits non-commercial use with credit. The Python package does
+not import either project; it communicates over MCP. Free, non-monetized
+redistribution is supported by the optional combined image below. Selling,
+white-labelling, or monetizing access to WanGP needs a separate written license;
+see [NOTICE.md](NOTICE.md).
 
 ## Install Wan2GP
 
@@ -57,19 +57,47 @@ cd nodetool-wan2gp
 pip install -e .
 ```
 
-It pulls in `nodetool-core`, `httpx`, and `mcp`. No PyTorch, no diffusers.
+It requires `nodetool-core>=0.8.0` with its `audio` extra, `httpx`, and MCP
+`>=1.16,<2`. The audio extra provides the dependencies needed for
+`ProcessingContext` asset conversion. No PyTorch, no diffusers.
 
 ## Point NodeTool at your server
 
-Set `WAN2GP_MCP_URL` before you start NodeTool. It becomes the default value of
-the `server_url` field on every node:
+Set `WAN2GP_MCP_URL` before you run a workflow. Nodes with a blank `server_url`
+resolve this environment variable at execution time:
 
 ```bash
 export WAN2GP_MCP_URL=http://127.0.0.1:7866/mcp
 ```
 
-Without it the nodes default to `http://127.0.0.1:7866/mcp`. You can also
-override `server_url` on a single node to reach a second machine.
+Without it they fall back to `http://127.0.0.1:7866/mcp`. An explicit non-blank
+`server_url` on a node always takes precedence, so it can reach a second machine.
+
+## Combined non-commercial GPU image
+
+`Dockerfile.combined` runs NodeTool and a revision-pinned WanGP MCP server in
+one container. WanGP uses an isolated Python environment and listens only on
+`127.0.0.1:7866`; NodeTool connects to it through the default
+`WAN2GP_MCP_URL`. Only NodeTool port 7777 needs to be published.
+
+```bash
+docker build -f Dockerfile.combined -t nodetool-wan2gp:combined .
+docker run --gpus all --rm -p 7777:7777 \
+  -e DB_PATH=/workspace/nodetool.db \
+  -v nodetool-wangp-data:/workspace \
+  nodetool-wan2gp:combined
+```
+
+The first generation downloads model weights into `/workspace/cache`; review
+each model's separate license. This image is only for free, non-monetized use.
+Read [the combined-image license and attribution notes](docs/combined-image-licenses.md)
+before building, running, or redistributing it.
+
+Every node also has a `max_media_bytes` limit for gallery uploads and downloads.
+It defaults to 512 MiB to avoid allocating the server's 8 GiB ticket limit by
+accident, and can be deliberately raised or lowered up to the explicit 8 GiB
+ceiling. Downloads are streamed through a small bounded spool before the final
+asset bytes are returned.
 
 ## The nodes
 
@@ -124,8 +152,11 @@ Generate(
 )
 ```
 
-`model_type` values are the stems of the JSON files in Wan2GP's `defaults/`
-directory, such as `t2v`, `t2v_2_2`, `i2v`, `i2v_2_2`, and `ti2v_2_2`. Call the
+`Generate` returns an image, video, or audio reference according to the
+returned gallery item's `media_type`; the dedicated video nodes reject
+non-video outputs. `model_type` values are the stems of the JSON files in
+Wan2GP's `defaults/` directory, such as `t2v`, `t2v_2_2`, `i2v`, `i2v_2_2`, and
+`ti2v_2_2`. Call the
 `wangp_models` tool on your own server for the list it offers. See
 [docs/wan2gp-contract.md](docs/wan2gp-contract.md) for the MCP tool shapes this
 package depends on.

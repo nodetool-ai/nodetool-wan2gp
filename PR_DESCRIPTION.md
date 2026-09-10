@@ -9,7 +9,7 @@ three nodes and nothing else:
 | --- | --- |
 | `wan2gp.text_to_video.TextToVideo` | `VideoRef` |
 | `wan2gp.image_to_video.ImageToVideo` | `VideoRef` |
-| `wan2gp.generate.Generate` | `VideoRef` |
+| `wan2gp.generate.Generate` | `ImageRef`, `VideoRef`, or `AudioRef` |
 
 The pack reaches Wan2GP through its MCP server over streamable HTTP, using the
 official `mcp` client. Every call goes through `_client.py`; nodes never build
@@ -22,9 +22,9 @@ unwinds.
 
 The process boundary is a license boundary. Wan2GP is proprietary under the
 WanGP Community License 2.0 and its memory manager `mmgp` is non-commercial
-only, so this pack never imports either one. It depends on `nodetool-core`,
-`httpx`, and `mcp`. No PyTorch. `NOTICE.md` states the boundary and README.md
-repeats it.
+only, so this pack never imports either one. It depends on
+`nodetool-core[audio]`, `httpx`, and `mcp`. No PyTorch. `NOTICE.md` states the
+boundary and README.md repeats it.
 
 ## How to test
 
@@ -38,7 +38,7 @@ nodetool-pkg scan          # 3 nodes, JSON matches the committed file
 grep -rn "shared.api\|import wgp\|mmgp" src tests scripts   # must print nothing
 ```
 
-The suite is 93 tests and needs no network and no Wan2GP. `tests/conftest.py`
+The suite is run in CI and needs no network and no Wan2GP. `tests/conftest.py`
 serves a fake MCP server in-process over `httpx.ASGITransport`, injected into
 the `mcp` client through its `httpx_client_factory`. It answers `initialize`,
 `tools/list`, and `tools/call` from `tests/fixtures/`, records every request,
