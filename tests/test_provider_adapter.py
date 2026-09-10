@@ -180,6 +180,19 @@ def test_image_to_video_settings_use_input_path(tmp_path: Path) -> None:
     assert settings["video_length"] == "5s"
 
 
+def test_image_to_video_rejects_empty_start_frame(tmp_path: Path) -> None:
+    image = tmp_path / "empty.png"
+    image.touch()
+    with pytest.raises(ValueError, match="readable image_path"):
+        _settings(
+            {
+                "operation": "image_to_video",
+                "image_path": str(image),
+                "params": {"model": "i2v_2_2"},
+            }
+        )
+
+
 def test_reference_models_are_discovered_from_pinned_metadata() -> None:
     session = SimpleNamespace(list_model_metadata=lambda: [REFERENCE_METADATA])
     assert _models(session, "video")[0]["supportedTasks"] == [
@@ -294,6 +307,33 @@ def test_reference_audio_requires_video_and_declared_audio_mode(tmp_path: Path) 
         REFERENCE_METADATA,
     )
     assert "audio_prompt_type" not in disabled
+
+
+@pytest.mark.parametrize("case", ["image-only", "video-only", "mixed"])
+def test_reference_to_video_rejects_empty_reference_media(
+    tmp_path: Path, case: str
+) -> None:
+    image = tmp_path / "image.png"
+    image.write_bytes(b"image")
+    empty_image = tmp_path / "empty.png"
+    empty_image.touch()
+    empty_video = tmp_path / "empty.mp4"
+    empty_video.touch()
+    image_paths = [str(empty_image)] if case == "image-only" else []
+    video_paths = [str(empty_video)] if case == "video-only" else []
+    if case == "mixed":
+        image_paths = [str(image)]
+        video_paths = [str(empty_video)]
+    with pytest.raises(ValueError, match="readable reference media paths"):
+        _settings(
+            {
+                "operation": "reference_to_video",
+                "reference_image_paths": image_paths,
+                "reference_video_paths": video_paths,
+                "params": {"model": REFERENCE_METADATA["model_type"]},
+            },
+            REFERENCE_METADATA,
+        )
 
 
 def test_reference_to_video_rejects_unsupported_model_and_count_before_submission(

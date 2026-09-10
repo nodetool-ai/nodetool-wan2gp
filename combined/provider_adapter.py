@@ -269,7 +269,7 @@ def _model_id(request: dict[str, Any]) -> str:
 
 def _input_path(request: dict[str, Any], name: str) -> Path:
     path = Path(str(request.get(name) or "")).resolve()
-    if not path.is_file():
+    if not path.is_file() or path.stat().st_size == 0:
         raise ValueError(f"{request.get('operation')} requires a readable {name}")
     return path
 
@@ -368,7 +368,10 @@ def _settings(
             raise ValueError("reference media paths must be arrays")
         image_paths = [Path(str(path)).resolve() for path in raw_image_paths]
         video_paths = [Path(str(path)).resolve() for path in raw_video_paths]
-        if any(not path.is_file() for path in image_paths + video_paths):
+        if any(
+            not path.is_file() or path.stat().st_size == 0
+            for path in image_paths + video_paths
+        ):
             raise ValueError(
                 "reference_to_video requires readable reference media paths"
             )
