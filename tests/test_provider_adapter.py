@@ -17,6 +17,13 @@ from combined.provider_adapter import (  # noqa: E402
 )
 
 
+REFERENCE_METADATA = json.loads(
+    (
+        Path(__file__).parent / "fixtures" / "wangp_h3_reference_metadata.json"
+    ).read_text()
+)
+
+
 def test_video_models_exposes_supported_tasks() -> None:
     session = SimpleNamespace(
         list_model_metadata=lambda: [
@@ -171,6 +178,167 @@ def test_image_to_video_settings_use_input_path(tmp_path: Path) -> None:
     assert settings["image_start"] == str(image.resolve())
     assert settings["image_prompt_type"] == "S"
     assert settings["video_length"] == "5s"
+
+
+def test_reference_models_are_discovered_from_pinned_metadata() -> None:
+    session = SimpleNamespace(list_model_metadata=lambda: [REFERENCE_METADATA])
+    assert _models(session, "video")[0]["supportedTasks"] == [
+        "text_to_video",
+        "image_to_video",
+        "reference_to_video",
+    ]
+
+    video_only = dict(REFERENCE_METADATA)
+    video_only["model_type"] = "wan2gp_video_ref"
+    video_only["media_inputs"] = {"image": {}, "video": {"control": True}}
+    video_only["setting_values"] = {
+        "video_prompt_type": {
+            "guide_custom_choices": {
+                "choices": [
+                    {"label": "Use One Reference Video", "value": "V-U"},
+                    {"label": "Use Two Reference Videos", "value": "V+-U"},
+                ]
+            }
+        }
+    }
+    assert (
+        "reference_to_video"
+        in _models(SimpleNamespace(list_model_metadata=lambda: [video_only]), "video")[
+            0
+        ]["supportedTasks"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("images", "videos", "expected"),
+    [
+        (1, 0, {"image_refs": 1, "video_prompt_type": "I"}),
+        (0, 1, {"video_guide": 1, "video_prompt_type": "V-U"}),
+        (0, 2, {"video_guide": 1, "video_guide2": 1, "video_prompt_type": "V+-U"}),
+        (1, 1, {"image_refs": 1, "video_guide": 1, "video_prompt_type": "IV-U"}),
+    ],
+)
+def test_reference_to_video_maps_each_declared_media_slot(
+    tmp_path: Path, images: int, videos: int, expected: dict[str, int | str]
+) -> None:
+    image_paths = []
+    video_paths = []
+    for index in range(images):
+        path = tmp_path / f"ref{index}.png"
+        path.write_bytes(b"image")
+        image_paths.append(str(path))
+    for index in range(videos):
+        path = tmp_path / f"guide{index}.mp4"
+        path.write_bytes(b"video")
+        video_paths.append(str(path))
+    settings = _settings(
+        {
+            "operation": "reference_to_video",
+            "reference_image_paths": image_paths,
+            "reference_video_paths": video_paths,
+            "params": {
+                "model": REFERENCE_METADATA["model_type"],
+                "prompt": "keep identity",
+            },
+        },
+        REFERENCE_METADATA,
+    )
+    for key, value in expected.items():
+        if isinstance(value, str):
+            assert settings[key] == value
+        elif key == "image_refs":
+            assert len(settings[key]) == value
+        else:
+            assert key in settings
+
+
+def test_reference_audio_requires_video_and_declared_audio_mode(tmp_path: Path) -> None:
+    image = tmp_path / "ref.png"
+    image.write_bytes(b"image")
+    with pytest.raises(ValueError, match="at least one reference video"):
+        _settings(
+            {
+                "operation": "reference_to_video",
+                "reference_image_paths": [str(image)],
+                "params": {
+                    "model": REFERENCE_METADATA["model_type"],
+                    "useReferenceVideoAudio": True,
+                },
+            },
+            REFERENCE_METADATA,
+        )
+
+    video = tmp_path / "guide.mp4"
+    video.write_bytes(b"video")
+    enabled = _settings(
+        {
+            "operation": "reference_to_video",
+            "reference_video_paths": [str(video)],
+            "params": {
+                "model": REFERENCE_METADATA["model_type"],
+                "useReferenceVideoAudio": True,
+            },
+        },
+        REFERENCE_METADATA,
+    )
+    assert enabled["audio_prompt_type"] == "K"
+    disabled = _settings(
+        {
+            "operation": "reference_to_video",
+            "reference_video_paths": [str(video)],
+            "params": {
+                "model": REFERENCE_METADATA["model_type"],
+                "useReferenceVideoAudio": False,
+            },
+        },
+        REFERENCE_METADATA,
+    )
+    assert "audio_prompt_type" not in disabled
+
+
+def test_reference_to_video_rejects_unsupported_model_and_count_before_submission(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "ref.png"
+    image.write_bytes(b"image")
+    request = {
+        "operation": "reference_to_video",
+        "reference_image_paths": [str(image)],
+        "params": {"model": "missing-model"},
+    }
+    with pytest.raises(ValueError, match="Unknown WanGP model"):
+        _settings(request, None)
+    guides = []
+    for index in range(3):
+        path = tmp_path / f"guide{index}.mp4"
+        path.write_bytes(b"video")
+        guides.append(str(path))
+    with pytest.raises(ValueError, match="at most two"):
+        _settings(
+            {
+                "operation": "reference_to_video",
+                "reference_video_paths": guides,
+                "params": {"model": REFERENCE_METADATA["model_type"]},
+            },
+            REFERENCE_METADATA,
+        )
+
+    single = dict(REFERENCE_METADATA)
+    single["media_inputs"] = {
+        "image": {"single_reference": True},
+        "video": {"control": True},
+    }
+    second = tmp_path / "ref2.png"
+    second.write_bytes(b"image")
+    with pytest.raises(ValueError, match="only one"):
+        _settings(
+            {
+                "operation": "reference_to_video",
+                "reference_image_paths": [str(image), str(second)],
+                "params": {"model": REFERENCE_METADATA["model_type"]},
+            },
+            single,
+        )
 
 
 def test_image_to_image_uses_reference_input_when_required(tmp_path: Path) -> None:
@@ -354,7 +522,9 @@ def test_generated_path_requires_successful_existing_file(tmp_path: Path) -> Non
 
 def test_callbacks_emit_serializable_progress() -> None:
     events = []
-    callbacks = _Callbacks(SimpleNamespace(send=lambda kind, data: events.append((kind, data))))
+    callbacks = _Callbacks(
+        SimpleNamespace(send=lambda kind, data: events.append((kind, data)))
+    )
     callbacks.on_progress(
         SimpleNamespace(
             phase="denoising",
@@ -417,3 +587,71 @@ def init(**kwargs):
     assert event["type"] == "result"
     assert event["data"]["models"][0]["id"] == "t2v"
     assert "upstream noise" in result.stderr
+
+
+def test_reference_discovery_excludes_control_and_start_only_models() -> None:
+    import copy
+
+    control = copy.deepcopy(REFERENCE_METADATA)
+    control["media_inputs"]["image"] = {"start": True}
+    choices = control["setting_values"]["video_prompt_type"]
+    choices["image_ref_choices"] = None
+    choices["guide_custom_choices"]["choices"] = [
+        {"label": "Generic control", "value": "GV"}
+    ]
+    assert (
+        "reference_to_video"
+        not in _models(SimpleNamespace(list_model_metadata=lambda: [control]), "video")[
+            0
+        ]["supportedTasks"]
+    )
+
+    image_only = copy.deepcopy(control)
+    image_only["media_inputs"]["image"] = {"reference": True}
+    image_only["media_inputs"]["video"] = {}
+    image_only["setting_values"]["video_prompt_type"]["guide_custom_choices"][
+        "choices"
+    ] = [{"label": "Reference", "value": "I"}]
+    assert (
+        "reference_to_video"
+        in _models(SimpleNamespace(list_model_metadata=lambda: [image_only]), "video")[
+            0
+        ]["supportedTasks"]
+    )
+
+
+@pytest.mark.parametrize("field", ["reference_image_paths", "reference_video_paths"])
+@pytest.mark.parametrize("value", [None, "not-an-array", 1])
+def test_reference_paths_require_arrays(field: str, value: object) -> None:
+    with pytest.raises(ValueError, match="must be arrays"):
+        _settings(
+            {
+                "operation": "reference_to_video",
+                field: value,
+                "params": {"model": REFERENCE_METADATA["model_type"]},
+            },
+            REFERENCE_METADATA,
+        )
+
+
+def test_reference_rejects_unadvertised_video_and_audio_modes(tmp_path: Path) -> None:
+    import copy
+
+    video = tmp_path / "guide.mp4"
+    video.write_bytes(b"video")
+    request = {
+        "operation": "reference_to_video",
+        "reference_video_paths": [str(video)],
+        "params": {"model": REFERENCE_METADATA["model_type"]},
+    }
+    metadata = copy.deepcopy(REFERENCE_METADATA)
+    metadata["setting_values"]["video_prompt_type"]["guide_custom_choices"][
+        "choices"
+    ] = [{"value": "V+-U"}]
+    with pytest.raises(ValueError, match="video count"):
+        _settings(request, metadata)
+    metadata = copy.deepcopy(REFERENCE_METADATA)
+    metadata["setting_values"]["audio_prompt_type"]["sources"] = None
+    request["params"]["useReferenceVideoAudio"] = True
+    with pytest.raises(ValueError, match="audio is not supported"):
+        _settings(request, metadata)
