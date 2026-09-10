@@ -31,6 +31,13 @@ dev = [
     "ty",
 ]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.env",
+    "/.env.*",
+    "/.pi-subagents/",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/nodetool"]
 include = [

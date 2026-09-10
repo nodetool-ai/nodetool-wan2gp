@@ -10,4 +10,7 @@ dist/
 .ruff_cache
 .mypy_cache
 .env
+.env.*
+.pi-subagents/
+artifacts/
 .DS_Store
