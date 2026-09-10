@@ -165,13 +165,15 @@ def report_failure(error: BaseException, server_url: str) -> None:
 async def run(args: argparse.Namespace) -> int:
     """Run the node once. Return the process exit code."""
     from nodetool.workflows.processing_context import ProcessingContext
+    from nodetool.nodes.wan2gp._base import resolve_server_url
 
     workspace = args.workspace_dir or tempfile.mkdtemp(prefix="wan2gp-smoke-")
     Path(workspace).mkdir(parents=True, exist_ok=True)
     context = ProcessingContext(workspace_dir=workspace)
 
     node = make_node(args)
-    print(f"server:    {node.server_url}")
+    resolved_server_url = resolve_server_url(node.server_url)
+    print(f"server:    {resolved_server_url}")
     print(f"workspace: {workspace}")
     print("settings sent to wangp_generate:")
     for key, value in node.build_settings().items():
@@ -187,7 +189,7 @@ async def run(args: argparse.Namespace) -> int:
     try:
         video = await task
     except BaseException as error:  # noqa: BLE001 - the script reports and exits
-        report_failure(error, node.server_url)
+        report_failure(error, resolved_server_url)
         return 1
 
     data = await context.asset_to_bytes(video)

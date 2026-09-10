@@ -13,19 +13,34 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from nodetool.metadata.types import ImageRef, VideoRef
+from nodetool.metadata.types import AssetRef, ImageRef, VideoRef
 from nodetool.workflows.base_node import BaseNode
-from nodetool.workflows.processing_context import NodeCancelledError, ProcessingContext
+from nodetool.workflows.processing_context import ProcessingContext
 from nodetool.workflows.types import NodeProgress
 from pydantic import Field
 
-from ._client import DEFAULT_SERVER_URL, Wan2GPClient, job_error_message
+from ._client import (
+    CANCEL_TIMEOUT_SECONDS,
+    DEFAULT_MAX_MEDIA_BYTES,
+    DEFAULT_SERVER_URL,
+    MAX_MEDIA_BYTES,
+    Wan2GPClient,
+    job_error_message,
+)
 
 #: How long to wait between two ``wangp_get_job`` polls.
 POLL_INTERVAL_SECONDS = 1.0
 
-#: The server this package talks to unless a node says otherwise.
-SERVER_URL_DEFAULT = os.environ.get("WAN2GP_MCP_URL", DEFAULT_SERVER_URL)
+#: Empty metadata-safe sentinel; the environment is resolved at execution time.
+SERVER_URL_DEFAULT: str | None = None
+
+
+def resolve_server_url(server_url: str | None) -> str:
+    """Resolve an explicit node URL, then the runtime environment, then localhost."""
+    explicit = (server_url or "").strip()
+    if explicit:
+        return explicit
+    return os.environ.get("WAN2GP_MCP_URL", "").strip() or DEFAULT_SERVER_URL
 
 SettingsBuilder = Callable[[Wan2GPClient], Awaitable[dict[str, Any]]]
 
@@ -67,13 +82,19 @@ def video_filename(data: bytes) -> str:
 class _Wan2GPNode(BaseNode):
     """Shared connection fields and run loop. Not a node in its own right."""
 
-    server_url: str = Field(
+    server_url: str | None = Field(
         default=SERVER_URL_DEFAULT,
-        description="URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Defaults to the WAN2GP_MCP_URL environment variable.",
+        description="URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Leave blank to use WAN2GP_MCP_URL at execution time, then localhost.",
     )
     timeout_seconds: int = Field(
         default=1800,
         description="How long to wait for one generation before giving up, in seconds.",
+    )
+    max_media_bytes: int = Field(
+        default=DEFAULT_MAX_MEDIA_BYTES,
+        ge=1,
+        le=MAX_MEDIA_BYTES,
+        description="Maximum media upload/download size in bytes. Defaults to 512 MiB; values up to the 8 GiB safety ceiling are allowed.",
     )
     seed: int = Field(
         default=-1,
@@ -126,21 +147,26 @@ class _Wan2GPNode(BaseNode):
         )
 
     async def run_generation(
-        self, context: ProcessingContext, build_settings: SettingsBuilder
-    ) -> VideoRef:
+        self,
+        context: ProcessingContext,
+        build_settings: SettingsBuilder,
+        expected_media_type: str | None = None,
+    ) -> AssetRef:
         """Submit one generation, follow it, and return its first output.
 
         ``build_settings`` gets a connected client so a node can upload its
         input media before it decides on the settings dict.
         """
         async with Wan2GPClient(
-            self.server_url, timeout=float(self.timeout_seconds)
+            resolve_server_url(self.server_url),
+            timeout=float(self.timeout_seconds),
+            max_transfer_bytes=self.max_media_bytes,
         ) as client:
             settings = await build_settings(client)
             context.raise_if_cancelled()
             job_id = await client.submit(settings)
             job = await self._follow_job(context, client, job_id)
-            return await self._output_of(context, client, job)
+            return await self._output_of(context, client, job, expected_media_type)
 
     async def _follow_job(
         self, context: ProcessingContext, client: Wan2GPClient, job_id: str
@@ -162,19 +188,25 @@ class _Wan2GPNode(BaseNode):
                 timeout=float(self.timeout_seconds),
                 sleep=sleep,
             )
-        except (NodeCancelledError, asyncio.CancelledError):
-            # Tell Wan2GP to stop before this node goes away. Wan2GP cancels
-            # cooperatively, so the call only requests the stop.
+        except BaseException:
+            # Timeout, a failed poll, and local cancellation all leave a queued
+            # remote job behind unless we ask the server to stop it. Keep this
+            # bounded: cancellation is cooperative and best effort.
             try:
-                await client.cancel(job_id)
+                async with asyncio.timeout(CANCEL_TIMEOUT_SECONDS):
+                    await client.cancel(job_id)
             except BaseException:
                 pass
             raise
 
     async def _output_of(
-        self, context: ProcessingContext, client: Wan2GPClient, job: dict[str, Any]
-    ) -> VideoRef:
-        """Turn a finished job into a VideoRef, or raise its errors."""
+        self,
+        context: ProcessingContext,
+        client: Wan2GPClient,
+        job: dict[str, Any],
+        expected_media_type: str | None = None,
+    ) -> AssetRef:
+        """Convert the first gallery item to its declared media reference."""
         result = job.get("result") or {}
         if not result.get("success"):
             raise ValueError(job_error_message(job))
@@ -183,8 +215,22 @@ class _Wan2GPNode(BaseNode):
             raise ValueError(
                 "Wan2GP finished the generation but put no media in its gallery."
             )
-        media_id = str(items[0].get("media_id") or "").strip()
+        item = items[0]
+        if not isinstance(item, dict):
+            raise ValueError("Wan2GP returned an invalid gallery item.")
+        media_id = str(item.get("media_id") or "").strip()
+        media_type = str(item.get("media_type") or "").strip().lower()
         if not media_id:
             raise ValueError("Wan2GP returned a gallery item without a media_id.")
+        if media_type not in {"image", "video", "audio"}:
+            raise ValueError(f"Wan2GP returned an unsupported gallery media_type: {media_type or '(missing)'}.")
+        if expected_media_type is not None and media_type != expected_media_type:
+            raise ValueError(
+                f"Wan2GP returned {media_type} output, but this node requires {expected_media_type}."
+            )
         data = await client.download_media(media_id)
+        if media_type == "image":
+            return await context.image_from_bytes(data)
+        if media_type == "audio":
+            return await context.audio_from_bytes(data)
         return await context.video_from_bytes(data)

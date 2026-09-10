@@ -103,6 +103,17 @@ async def test_process_falls_back_to_the_percentage_without_steps(
     assert (progress[0].progress, progress[0].total) == (40, 100)
 
 
+async def test_dedicated_video_node_rejects_an_image_output(
+    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
+):
+    done = fixture("job_done")
+    done["result"]["gallery_items"][0]["media_type"] = "image"
+    fake_server.job_snapshots = [done]
+
+    with pytest.raises(ValueError, match="requires video"):
+        await a_node(server_url).process(context)
+
+
 async def test_process_downloads_the_first_gallery_item(
     server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
 ):

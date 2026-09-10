@@ -14,6 +14,7 @@
       "inline_fields": [
         "server_url",
         "timeout_seconds",
+        "max_media_bytes",
         "seed",
         "model_type"
       ],
@@ -28,17 +29,29 @@
         {
           "name": "output",
           "type": {
-            "type": "video"
+            "type": "union",
+            "type_args": [
+              {
+                "type": "image"
+              },
+              {
+                "type": "video"
+              },
+              {
+                "type": "audio"
+              }
+            ]
           }
         }
       ],
       "properties": [
         {
-          "default": "http://127.0.0.1:7866/mcp",
-          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Defaults to the WAN2GP_MCP_URL environment variable.",
+          "default": null,
+          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Leave blank to use WAN2GP_MCP_URL at execution time, then localhost.",
           "name": "server_url",
           "title": "Server Url",
           "type": {
+            "optional": true,
             "type": "str"
           }
         },
@@ -47,6 +60,17 @@
           "description": "How long to wait for one generation before giving up, in seconds.",
           "name": "timeout_seconds",
           "title": "Timeout Seconds",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 536870912,
+          "description": "Maximum media upload/download size in bytes. Defaults to 512 MiB; values up to the 8 GiB safety ceiling are allowed.",
+          "max": 8589934592.0,
+          "min": 1.0,
+          "name": "max_media_bytes",
+          "title": "Max Media Bytes",
           "type": {
             "type": "int"
           }
@@ -122,6 +146,7 @@
       "inline_fields": [
         "server_url",
         "timeout_seconds",
+        "max_media_bytes",
         "seed",
         "prompt",
         "negative_prompt",
@@ -149,11 +174,12 @@
       ],
       "properties": [
         {
-          "default": "http://127.0.0.1:7866/mcp",
-          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Defaults to the WAN2GP_MCP_URL environment variable.",
+          "default": null,
+          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Leave blank to use WAN2GP_MCP_URL at execution time, then localhost.",
           "name": "server_url",
           "title": "Server Url",
           "type": {
+            "optional": true,
             "type": "str"
           }
         },
@@ -162,6 +188,17 @@
           "description": "How long to wait for one generation before giving up, in seconds.",
           "name": "timeout_seconds",
           "title": "Timeout Seconds",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 536870912,
+          "description": "Maximum media upload/download size in bytes. Defaults to 512 MiB; values up to the 8 GiB safety ceiling are allowed.",
+          "max": 8589934592.0,
+          "min": 1.0,
+          "name": "max_media_bytes",
+          "title": "Max Media Bytes",
           "type": {
             "type": "int"
           }
@@ -305,6 +342,7 @@
       "inline_fields": [
         "server_url",
         "timeout_seconds",
+        "max_media_bytes",
         "seed",
         "prompt",
         "negative_prompt",
@@ -329,11 +367,12 @@
       ],
       "properties": [
         {
-          "default": "http://127.0.0.1:7866/mcp",
-          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Defaults to the WAN2GP_MCP_URL environment variable.",
+          "default": null,
+          "description": "URL of the MCP endpoint of your own Wan2GP server, for example http://127.0.0.1:7866/mcp. Leave blank to use WAN2GP_MCP_URL at execution time, then localhost.",
           "name": "server_url",
           "title": "Server Url",
           "type": {
+            "optional": true,
             "type": "str"
           }
         },
@@ -342,6 +381,17 @@
           "description": "How long to wait for one generation before giving up, in seconds.",
           "name": "timeout_seconds",
           "title": "Timeout Seconds",
+          "type": {
+            "type": "int"
+          }
+        },
+        {
+          "default": 536870912,
+          "description": "Maximum media upload/download size in bytes. Defaults to 512 MiB; values up to the 8 GiB safety ceiling are allowed.",
+          "max": 8589934592.0,
+          "min": 1.0,
+          "name": "max_media_bytes",
+          "title": "Max Media Bytes",
           "type": {
             "type": "int"
           }

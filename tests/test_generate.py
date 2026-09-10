@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from nodetool.metadata.types import ImageRef, VideoRef
+import pytest
+from nodetool.metadata.types import AudioRef, ImageRef, VideoRef
 
+from nodetool.nodes.wan2gp._client import Wan2GPError
 from nodetool.nodes.wan2gp.generate import Generate
 
 from conftest import FakeWan2GP, fixture, fixture_bytes, progress_messages
@@ -22,6 +24,49 @@ async def test_process_returns_the_generated_video(
 
     assert isinstance(video, VideoRef)
     assert video.data == fixture_bytes("tiny.mp4")
+
+
+async def test_node_media_limit_is_passed_to_the_client(
+    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
+):
+    with pytest.raises(Wan2GPError, match="exceeds the 1 byte transfer limit"):
+        await a_node(server_url, max_media_bytes=1).process(context)
+
+
+async def test_process_dispatches_an_image_output(
+    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
+):
+    done = fixture("job_done")
+    done["result"]["gallery_items"][0]["media_type"] = "image"
+    fake_server.job_snapshots = [done]
+    fake_server.download_payload = fixture_bytes("tiny.png")
+
+    image = await a_node(server_url).process(context)
+
+    assert isinstance(image, ImageRef)
+    assert image.data == fixture_bytes("tiny.png")
+
+
+async def test_process_dispatches_an_audio_output(
+    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
+):
+    import io
+    import wave
+
+    done = fixture("job_done")
+    done["result"]["gallery_items"][0]["media_type"] = "audio"
+    fake_server.job_snapshots = [done]
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(8000)
+        wav.writeframes(b"\\x00\\x00" * 80)
+    fake_server.download_payload = audio.getvalue()
+
+    result = await a_node(server_url).process(context)
+
+    assert isinstance(result, AudioRef)
 
 
 async def test_process_merges_user_settings_over_the_model_defaults(

@@ -95,4 +95,4 @@ class TextToVideo(_Wan2GPNode):
         async def build(_client: Wan2GPClient) -> dict[str, Any]:
             return self.build_settings()
 
-        return await self.run_generation(context, build)
+        return await self.run_generation(context, build, expected_media_type="video")

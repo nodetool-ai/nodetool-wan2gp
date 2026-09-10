@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from nodetool.nodes.wan2gp._base import resolve_server_url
 from nodetool.nodes.wan2gp._settings import (
     lora_settings,
     merged_settings,
@@ -16,6 +17,14 @@ from nodetool.nodes.wan2gp.image_to_video import ImageToVideo
 from nodetool.nodes.wan2gp.text_to_video import TextToVideo
 
 from conftest import fixture
+
+def test_server_url_resolves_at_execution_time(monkeypatch):
+    monkeypatch.setenv("WAN2GP_MCP_URL", "http://env.example/mcp")
+    assert resolve_server_url(None) == "http://env.example/mcp"
+    assert resolve_server_url("  http://explicit.example/mcp ") == "http://explicit.example/mcp"
+    monkeypatch.delenv("WAN2GP_MCP_URL")
+    assert resolve_server_url("") == "http://127.0.0.1:7866/mcp"
+
 
 TEXT_TO_VIDEO_DEFAULTS = {
     "model_type": "t2v_2_2",

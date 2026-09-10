@@ -5,6 +5,11 @@ from __future__ import annotations
 import pytest
 
 from nodetool.nodes.wan2gp._client import (
+    DEFAULT_MAX_MEDIA_BYTES,
+    GenerationTimeoutError,
+    MAX_MEDIA_BYTES,
+    MEDIA_SPOOL_MEMORY_BYTES,
+    SSE_READ_TIMEOUT_SECONDS,
     Wan2GPClient,
     Wan2GPError,
     job_error_message,
@@ -73,6 +78,61 @@ async def test_upload_rejects_an_unsupported_extension(server_url, client_factor
             await client.upload_bytes("notes.txt", b"hello")
 
 
+async def test_media_client_disables_redirects(server_url, client_factory):
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        assert client.media_client.follow_redirects is False
+
+
+@pytest.mark.parametrize(
+    "ticket_url",
+    ["http://foreign.test/wangp_api/gallery/upload/token", "//foreign.test/wangp_api/gallery/upload/token", "/other/token"],
+)
+async def test_transfer_ticket_must_be_relative_gallery_route(
+    server_url, client_factory, ticket_url
+):
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        with pytest.raises(Wan2GPError, match="relative|gallery transfer route"):
+            client._transfer_url({"upload_url": ticket_url}, "upload_url", "PUT")
+
+
+async def test_upload_enforces_ticket_size(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        original = client.call_tool
+
+        async def ticket(name, args=None):
+            value = await original(name, args)
+            if name == "wangp_create_gallery_upload":
+                value["max_bytes"] = 1
+            return value
+
+        client.call_tool = ticket
+        with pytest.raises(Wan2GPError, match="exceeds"):
+            await client.upload_bytes("start.png", b"too large")
+        assert not fake_server.uploads
+
+
+async def test_download_enforces_streamed_size(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    fake_server.download_payload = b"too large"
+    # Keep Content-Length within the ticket limit so overflow is found while streaming.
+    fake_server.download_content_length = 1
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        original = client.call_tool
+
+        async def ticket(name, args=None):
+            value = await original(name, args)
+            if name == "wangp_create_gallery_download":
+                value["size"] = 1
+            return value
+
+        client.call_tool = ticket
+        with pytest.raises(Wan2GPError, match="exceeds"):
+            await client.download_media("visual:9f8e7d6c5b4a")
+
+
 async def test_download_round_trip_returns_the_bytes(
     server_url, client_factory, fake_server: FakeWan2GP
 ):
@@ -84,6 +144,38 @@ async def test_download_round_trip_returns_the_bytes(
     assert fake_server.args_for("wangp_create_gallery_download") == [
         {"media_id": "visual:9f8e7d6c5b4a"}
     ]
+
+
+async def test_download_spools_large_payload_before_returning_bytes(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    fake_server.download_payload = b"x" * (MEDIA_SPOOL_MEMORY_BYTES + 1)
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        original = client.call_tool
+
+        async def ticket(name, args=None):
+            value = await original(name, args)
+            if name == "wangp_create_gallery_download":
+                value.pop("size", None)
+            return value
+
+        client.call_tool = ticket
+        data = await client.download_media("visual:9f8e7d6c5b4a")
+
+    assert data == fake_server.download_payload
+
+
+def test_media_limit_defaults_safely_and_rejects_values_over_the_ceiling(server_url):
+    client = Wan2GPClient(server_url)
+    assert client.max_transfer_bytes == DEFAULT_MAX_MEDIA_BYTES
+    with pytest.raises(ValueError, match="between 1"):
+        Wan2GPClient(server_url, max_transfer_bytes=MAX_MEDIA_BYTES + 1)
+    with pytest.raises(ValueError, match="between 1"):
+        Wan2GPClient(server_url, max_transfer_bytes=0)
+
+
+def test_sse_read_timeout_is_longer_than_short_http_timeout():
+    assert SSE_READ_TIMEOUT_SECONDS >= 300
 
 
 async def test_submit_returns_the_job_id(server_url, client_factory, fake_server: FakeWan2GP):
@@ -129,6 +221,35 @@ async def test_poll_until_done_times_out(server_url, client_factory, fake_server
     async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
         with pytest.raises(Wan2GPError, match="did not finish within"):
             await client.poll_until_done("job-1", timeout=0.0, sleep=no_sleep)
+
+
+async def test_generation_timeout_cancels_remote_job(
+    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
+):
+    fake_server.job_snapshots = [fixture("job_running")]
+    from nodetool.nodes.wan2gp.generate import Generate
+
+    node = Generate(server_url=server_url, timeout_seconds=0)
+    node._id = "g-timeout"
+    with pytest.raises(Wan2GPError, match="did not finish within"):
+        await node.process(context)
+    assert fake_server.cancelled_jobs == ["3d9a1c0e5b7f4a2d8c6e0f1a2b3c4d5e"]
+
+
+async def test_poll_bounds_a_slow_request_by_the_remaining_deadline(
+    server_url, client_factory
+):
+    import asyncio
+
+    client = Wan2GPClient(server_url, httpx_client_factory=client_factory)
+
+    async def slow_get_job(_job_id):
+        await asyncio.sleep(1)
+        return {}
+
+    client.get_job = slow_get_job
+    with pytest.raises(GenerationTimeoutError):
+        await client.poll_until_done("job-1", timeout=0.01, sleep=lambda _: asyncio.sleep(0))
 
 
 async def test_cancel_requests_cancellation(server_url, client_factory, fake_server: FakeWan2GP):

@@ -108,4 +108,4 @@ class ImageToVideo(_Wan2GPNode):
             media_id = await self.upload_image(context, client, self.image)
             return self.build_settings(media_id)
 
-        return await self.run_generation(context, build)
+        return await self.run_generation(context, build, expected_media_type="video")

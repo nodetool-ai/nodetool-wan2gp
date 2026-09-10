@@ -12,6 +12,7 @@ share one base URL. See docs/wan2gp-contract.md for the tool shapes.
 from __future__ import annotations
 
 import json
+import tempfile
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
@@ -25,6 +26,18 @@ from mcp.shared._httpx_utils import McpHttpClientFactory, create_mcp_http_client
 from mcp.types import CallToolResult, TextContent
 
 DEFAULT_SERVER_URL = "http://127.0.0.1:7866/mcp"
+#: Short timeout for an individual MCP or media HTTP request.
+REQUEST_TIMEOUT_SECONDS = 30.0
+#: Keep the MCP event stream open while a generation is running.
+SSE_READ_TIMEOUT_SECONDS = 300.0
+#: Safe default for one media transfer; users may raise it up to the ceiling.
+DEFAULT_MAX_MEDIA_BYTES = 512 * 1024**2
+#: Explicit absolute upper bound for one media transfer.
+MAX_MEDIA_BYTES = 8 * 1024**3
+#: Keep only a small prefix of a download in memory before spooling to disk.
+MEDIA_SPOOL_MEMORY_BYTES = 1 * 1024**2
+#: Cancellation is best effort and must never hold up node shutdown.
+CANCEL_TIMEOUT_SECONDS = 5.0
 
 # Extensions Wan2GP's gallery accepts, from shared/mcp_server.py.
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
@@ -36,6 +49,10 @@ ProgressCallback = Callable[[dict[str, Any]], None] | Callable[[dict[str, Any]],
 
 class Wan2GPError(RuntimeError):
     """A Wan2GP server rejected a call, or reported a failed generation."""
+
+
+class GenerationTimeoutError(Wan2GPError):
+    """The overall deadline for a generation elapsed while polling."""
 
 
 def media_type_for(filename: str) -> str:
@@ -55,7 +72,37 @@ def media_type_for(filename: str) -> str:
 def _origin_of(server_url: str) -> str:
     """Return the origin that Wan2GP's relative transfer URLs resolve against."""
     parsed = httpx.URL(server_url)
+    if parsed.scheme not in ("http", "https") or not parsed.host:
+        raise Wan2GPError("Wan2GP server_url must be an http or https URL.")
     return str(parsed.copy_with(raw_path=b"/", query=None, fragment=None))
+
+
+def _ticket_limit(ticket: dict[str, Any], hard_limit: int) -> int:
+    """Return the effective byte limit advertised by a transfer ticket."""
+    limit = hard_limit
+    for key in ("max_bytes", "size"):
+        if key in ticket and ticket[key] is not None:
+            try:
+                advertised = int(ticket[key])
+            except (TypeError, ValueError) as exc:
+                raise Wan2GPError(f"Wan2GP returned an invalid transfer ticket {key}.") from exc
+            if advertised < 0:
+                raise Wan2GPError(f"Wan2GP returned a negative transfer ticket {key}.")
+            limit = min(limit, advertised)
+    return limit
+
+
+def _content_length(response: httpx.Response) -> int | None:
+    value = response.headers.get("content-length")
+    if value is None:
+        return None
+    try:
+        length = int(value)
+    except ValueError as exc:
+        raise Wan2GPError("Wan2GP returned an invalid Content-Length header.") from exc
+    if length < 0:
+        raise Wan2GPError("Wan2GP returned a negative Content-Length header.")
+    return length
 
 
 def _text_payload(result: CallToolResult) -> str | None:
@@ -135,10 +182,16 @@ class Wan2GPClient:
         server_url: str = DEFAULT_SERVER_URL,
         timeout: float = 1800.0,
         httpx_client_factory: McpHttpClientFactory = create_mcp_http_client,
+        max_transfer_bytes: int = DEFAULT_MAX_MEDIA_BYTES,
     ) -> None:
         self.server_url = server_url
         self.origin = _origin_of(server_url)
         self.timeout = timeout
+        if not 0 < max_transfer_bytes <= MAX_MEDIA_BYTES:
+            raise ValueError(
+                f"max_transfer_bytes must be between 1 and {MAX_MEDIA_BYTES} bytes"
+            )
+        self.max_transfer_bytes = max_transfer_bytes
         self._httpx_client_factory = httpx_client_factory
         self._stack: AsyncExitStack | None = None
         self._session: ClientSession | None = None
@@ -155,16 +208,19 @@ class Wan2GPClient:
             read_stream, write_stream, _get_session_id = await stack.enter_async_context(
                 streamablehttp_client(
                     self.server_url,
-                    timeout=self.timeout,
-                    sse_read_timeout=self.timeout,
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                    sse_read_timeout=max(SSE_READ_TIMEOUT_SECONDS, self.timeout),
                     httpx_client_factory=self._httpx_client_factory,
                 )
             )
             session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
             self._media_client = await stack.enter_async_context(
-                self._httpx_client_factory(timeout=httpx.Timeout(self.timeout))
+                self._httpx_client_factory(timeout=httpx.Timeout(REQUEST_TIMEOUT_SECONDS))
             )
+            # Factories supplied by callers may choose a different default.
+            # Transfer tickets are one-use URLs, so redirects are never safe.
+            self._media_client.follow_redirects = False
         except BaseException:
             await stack.aclose()
             raise
@@ -231,6 +287,32 @@ class Wan2GPClient:
 
     # -- media -----------------------------------------------------------
 
+    def _transfer_url(
+        self, ticket: dict[str, Any], key: str, method: str
+    ) -> tuple[httpx.URL, int]:
+        """Validate a one-use media ticket before making an HTTP request."""
+        if not isinstance(ticket, dict):
+            raise Wan2GPError("Wan2GP returned an invalid media transfer ticket.")
+        if ticket.get("method", method) != method:
+            raise Wan2GPError(f"Wan2GP media ticket requires an unexpected HTTP method (expected {method}).")
+        raw_url = ticket.get(key)
+        if not isinstance(raw_url, str) or not raw_url or raw_url.startswith("//"):
+            raise Wan2GPError("Wan2GP media transfer tickets must contain a relative URL.")
+        parsed = httpx.URL(raw_url)
+        if parsed.scheme or parsed.host:
+            raise Wan2GPError("Wan2GP media transfer tickets must contain a relative URL.")
+        expected_prefix = "/wangp_api/gallery/upload/" if method == "PUT" else "/wangp_api/gallery/download/"
+        if "\\" in raw_url or any(part == ".." for part in parsed.path.split("/")):
+            raise Wan2GPError("Wan2GP media transfer ticket contains an unsafe path.")
+        if not parsed.path.startswith(expected_prefix) and not parsed.path.startswith(expected_prefix[1:]):
+            raise Wan2GPError("Wan2GP returned a media ticket outside its gallery transfer route.")
+        url = httpx.URL(self.origin).join(raw_url)
+        if not url.path.startswith(expected_prefix) or url.path == expected_prefix:
+            raise Wan2GPError("Wan2GP returned a media ticket outside its gallery transfer route.")
+        if _origin_of(str(url)) != self.origin:
+            raise Wan2GPError("Wan2GP media transfer ticket points to a different origin.")
+        return url, _ticket_limit(ticket, self.max_transfer_bytes)
+
     async def upload_bytes(self, filename: str, data: bytes) -> str:
         """Upload media to Wan2GP's gallery and return its ``media_id``.
 
@@ -241,14 +323,16 @@ class Wan2GPClient:
         """
         media_type_for(filename)  # reject unsupported extensions before the round trip
         ticket = await self.call_tool("wangp_create_gallery_upload", {"filename": filename})
-        url = httpx.URL(self.origin).join(ticket["upload_url"])
+        url, limit = self._transfer_url(ticket, "upload_url", "PUT")
+        if len(data) > limit:
+            raise Wan2GPError(f"Upload of {filename} exceeds the {limit} byte transfer limit.")
         response = await self.media_client.request(
-            ticket.get("method", "PUT"),
+            "PUT",
             url,
             content=data,
             headers={"content-type": "application/octet-stream"},
         )
-        if response.status_code >= 400:
+        if response.status_code < 200 or response.status_code >= 300:
             raise Wan2GPError(
                 f"Wan2GP rejected the upload of {filename}: {response.status_code} {response.text}"
             )
@@ -261,13 +345,34 @@ class Wan2GPClient:
     async def download_media(self, media_id: str) -> bytes:
         """Download one gallery item by ``media_id`` and return its bytes."""
         ticket = await self.call_tool("wangp_create_gallery_download", {"media_id": media_id})
-        url = httpx.URL(self.origin).join(ticket["download_url"])
-        response = await self.media_client.get(url)
-        if response.status_code >= 400:
-            raise Wan2GPError(
-                f"Wan2GP rejected the download of {media_id}: {response.status_code} {response.text}"
-            )
-        return response.content
+        url, limit = self._transfer_url(ticket, "download_url", "GET")
+        try:
+            async with self.media_client.stream("GET", url) as response:
+                if response.status_code < 200 or response.status_code >= 300:
+                    detail = (await response.aread())[:200].decode(errors="replace")
+                    raise Wan2GPError(
+                        f"Wan2GP rejected the download of {media_id}: {response.status_code} {detail}"
+                    )
+                content_length = _content_length(response)
+                if content_length is not None and content_length > limit:
+                    raise Wan2GPError(
+                        f"Download of {media_id} exceeds the {limit} byte transfer limit."
+                    )
+                size = 0
+                with tempfile.SpooledTemporaryFile(
+                    max_size=MEDIA_SPOOL_MEMORY_BYTES, mode="w+b"
+                ) as spool:
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > limit:
+                            raise Wan2GPError(
+                                f"Download of {media_id} exceeds the {limit} byte transfer limit."
+                            )
+                        spool.write(chunk)
+                    spool.seek(0)
+                    return spool.read()
+        except httpx.TooManyRedirects as exc:
+            raise Wan2GPError("Wan2GP media download unexpectedly redirected.") from exc
 
     # -- jobs ------------------------------------------------------------
 
@@ -311,7 +416,27 @@ class Wan2GPClient:
         deadline = None if timeout is None else time.monotonic() + timeout
         last_progress: dict[str, Any] | None = None
         while True:
-            job = await self.get_job(job_id)
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise GenerationTimeoutError(
+                    f"Wan2GP job {job_id} did not finish within {timeout:g} seconds."
+                )
+            try:
+                if remaining is None:
+                    job = await self.get_job(job_id)
+                else:
+                    import asyncio
+
+                    async with asyncio.timeout(remaining):
+                        job = await self.get_job(job_id)
+            except TimeoutError as exc:
+                # An HTTP client's own timeout is a poll failure, not the
+                # generation deadline, unless our deadline is now exhausted.
+                if deadline is None or time.monotonic() < deadline:
+                    raise
+                raise GenerationTimeoutError(
+                    f"Wan2GP job {job_id} did not finish within {timeout:g} seconds."
+                ) from exc
             progress = progress_from_job(job)
             if progress is not None and progress != last_progress:
                 last_progress = progress
@@ -321,8 +446,12 @@ class Wan2GPClient:
                         await outcome
             if job.get("done"):
                 return job
-            if deadline is not None and time.monotonic() >= deadline:
-                raise Wan2GPError(
-                    f"Wan2GP job {job_id} did not finish within {timeout:g} seconds."
-                )
-            await sleep(interval)
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None:
+                if remaining <= 0:
+                    raise GenerationTimeoutError(
+                        f"Wan2GP job {job_id} did not finish within {timeout:g} seconds."
+                    )
+                await sleep(min(interval, remaining))
+            else:
+                await sleep(interval)

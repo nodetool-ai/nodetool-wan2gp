@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nodetool.metadata.types import ImageRef, VideoRef
+from nodetool.metadata.types import AudioRef, ImageRef, VideoRef
 from nodetool.workflows.processing_context import ProcessingContext
 from pydantic import Field
 
@@ -71,7 +71,7 @@ class Generate(_Wan2GPNode):
             media=media,
         )
 
-    async def process(self, context: ProcessingContext) -> VideoRef:
+    async def process(self, context: ProcessingContext) -> ImageRef | VideoRef | AudioRef:
         async def build(client: Wan2GPClient) -> dict[str, Any]:
             return await self.build_settings(context, client)
 

@@ -36,6 +36,13 @@ TOOL_NAMES = [
 ]
 
 
+class _DefaultContentLength:
+    """Marker requesting the response body's actual length."""
+
+
+_DEFAULT_CONTENT_LENGTH = _DefaultContentLength()
+
+
 def fixture(name: str) -> Any:
     """Load one recorded Wan2GP response."""
     return json.loads((FIXTURES / f"{name}.json").read_text())
@@ -57,6 +64,8 @@ class FakeWan2GP:
         # Snapshots wangp_get_job returns, in order. The last one repeats.
         self.job_snapshots: list[dict[str, Any]] = [fixture("job_done")]
         self.download_payload: bytes = fixture_bytes("tiny.mp4")
+        # None omits the header; an integer can model an understated length.
+        self.download_content_length: int | None | _DefaultContentLength = _DEFAULT_CONTENT_LENGTH
         # Tool name -> message. A listed tool answers with isError instead.
         self.tool_errors: dict[str, str] = {}
         self._get_job_index = 0
@@ -202,7 +211,13 @@ class FakeWan2GP:
             return
 
         if path.startswith("/wangp_api/gallery/download/") and method == "GET":
-            await _send(send, 200, self.download_payload, "video/mp4")
+            await _send(
+                send,
+                200,
+                self.download_payload,
+                "video/mp4",
+                content_length=self.download_content_length,
+            )
             return
 
         await _send(send, 404, b'{"error":"not found"}', "application/json")
@@ -228,15 +243,23 @@ async def _read_body(receive: Any) -> bytes:
     return body
 
 
-async def _send(send: Any, status: int, body: bytes, content_type: str) -> None:
+async def _send(
+    send: Any,
+    status: int,
+    body: bytes,
+    content_type: str,
+    *,
+    content_length: int | None | _DefaultContentLength = _DEFAULT_CONTENT_LENGTH,
+) -> None:
+    headers = [(b"content-type", content_type.encode())]
+    if content_length is not None:
+        length = len(body) if content_length is _DEFAULT_CONTENT_LENGTH else content_length
+        headers.append((b"content-length", str(length).encode()))
     await send(
         {
             "type": "http.response.start",
             "status": status,
-            "headers": [
-                (b"content-type", content_type.encode()),
-                (b"content-length", str(len(body)).encode()),
-            ],
+            "headers": headers,
         }
     )
     await send({"type": "http.response.body", "body": body})
@@ -282,8 +305,15 @@ def wan2gp_nodes(monkeypatch, client_factory):
     from nodetool.nodes.wan2gp import _base
     from nodetool.nodes.wan2gp._client import Wan2GPClient
 
-    def make_client(url: str, timeout: float = 1800.0) -> Wan2GPClient:
-        return Wan2GPClient(url, timeout=timeout, httpx_client_factory=client_factory)
+    def make_client(
+        url: str, timeout: float = 1800.0, max_transfer_bytes: int = 512 * 1024**2
+    ) -> Wan2GPClient:
+        return Wan2GPClient(
+            url,
+            timeout=timeout,
+            max_transfer_bytes=max_transfer_bytes,
+            httpx_client_factory=client_factory,
+        )
 
     monkeypatch.setattr(_base, "Wan2GPClient", make_client)
     monkeypatch.setattr(_base, "POLL_INTERVAL_SECONDS", 0.0)
