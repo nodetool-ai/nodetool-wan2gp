@@ -13,6 +13,9 @@ separately licensed programs. The image is not endorsed by the WanGP authors.
   `WANGP_COMMIT`. Its complete source, license, notices, and bundled
   `docs/third_party_licenses` directory remain at `/opt/Wan2GP` in the image.
   No WanGP source modifications are made by this Dockerfile.
+- **NodeTool worker adapter support**: pinned by `NODETOOL_CORE_COMMIT`. The
+  source revision is fetched from the public nodetool-core repository during
+  the build and is not modified in the image.
 - **mmgp**: non-commercial use with attribution, pinned by `MMGP_COMMIT` and
   installed at the version required by WanGP. Its license and attribution are
   copied to `/opt/licenses/mmgp`.

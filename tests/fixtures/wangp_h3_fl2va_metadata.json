@@ -1,0 +1,33 @@
+{
+  "model_type": "minimax_h3_fl2va_pruned_pdd",
+  "name": "MiniMax H3 FL2VA",
+  "main_output": ["video"],
+  "media_inputs": {
+    "image": {
+      "reference": true,
+      "injected_frames": true
+    },
+    "video": {
+      "control": true
+    }
+  },
+  "capabilities": {
+    "text_to_video": true,
+    "image_to_video": true,
+    "reference_images": true,
+    "injected_frames": true,
+    "control_video": true
+  },
+  "setting_values": {
+    "video_prompt_type": {
+      "image_ref_choices": null,
+      "guide_custom_choices": {
+        "choices": [
+          ["Generate without using a Control Video", ""],
+          ["Use Control Video", "GV"],
+          ["Inject Frames", "KFI"]
+        ]
+      }
+    }
+  }
+}
