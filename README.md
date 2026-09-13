@@ -75,21 +75,28 @@ Without it they fall back to `http://127.0.0.1:7866/mcp`. An explicit non-blank
 
 ## Combined non-commercial GPU image
 
-`Dockerfile.combined` runs NodeTool and a revision-pinned WanGP MCP server in
-one container. WanGP uses an isolated Python environment and listens only on
-`127.0.0.1:7866`; NodeTool connects to it through the default
-`WAN2GP_MCP_URL`. Only NodeTool port 7777 needs to be published.
+`Dockerfile.combined` is a provider-only GPU worker. It runs the NodeTool
+Python worker and calls a revision-pinned WanGP runtime directly from its
+isolated Python environment. It does not start WanGP's MCP server or the
+NodeTool main process; connect an external NodeTool main process to the
+authenticated worker on port 7777. The regular package above remains the
+MCP-only client for a separately run Wan2GP server.
 
 ```bash
 docker build -f Dockerfile.combined -t nodetool-wan2gp:combined .
+export NODETOOL_WORKER_TOKEN="$(openssl rand -hex 32)"
 docker run --gpus all --rm -p 7777:7777 \
-  -e DB_PATH=/workspace/nodetool.db \
+  -e WAN2GP_ACCEPT_LICENSE=1 \
+  -e NODETOOL_WORKER_TOKEN \
   -v nodetool-wangp-data:/workspace \
   nodetool-wan2gp:combined
 ```
 
-The first generation downloads model weights into `/workspace/cache`; review
-each model's separate license. This image is only for free, non-monetized use.
+Set the same `NODETOOL_WORKER_TOKEN` in the external NodeTool main process. The
+worker stores WanGP configuration in `/workspace/wan2gp/config`, model weights
+in `/workspace/wan2gp/models`, generated files in `/workspace/wan2gp/outputs`,
+and Hugging Face cache data in `/workspace/cache/huggingface`. Review each
+model's separate license. This image is only for free, non-monetized use.
 Read [the combined-image license and attribution notes](docs/combined-image-licenses.md)
 before building, running, or redistributing it.
 

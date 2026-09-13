@@ -283,7 +283,7 @@ migration (`wgp.py:3181-3185`).
 | --- | --- |
 | `model_type` | one of the ids above |
 | `prompt` | text |
-| `negative_prompt` | text |
+| `negative_prompt` | non-empty text; omitted by the dedicated video nodes when blank |
 | `resolution` | `"<width>x<height>"`, e.g. `"832x480"` |
 | `video_length` | frame count as int, or a duration string like `"10s"` |
 | `force_fps` | fps; accepted as `24` or `"24"` (`docs/API.md:517`) |
@@ -293,6 +293,12 @@ migration (`wgp.py:3181-3185`).
 | `image_prompt_type` | `"S"` for an image-to-video run |
 | `activated_loras` | list of ids from `wangp_list_loras` |
 | `loras_multipliers` | matching weights as one space separated string |
+
+TextToVideo and ImageToVideo omit an empty `negative_prompt` so Wan2GP fills in
+the model's default. An explicit empty string would override that default in
+Wan2GP's settings merge. `Generate` retains explicit values in its user settings,
+including an empty string. The default text-to-video request is recorded in
+`tests/fixtures/text_to_video_default_request.json`.
 
 `activated_loras` values must not be absolute paths or contain `..`; the server
 raises `PermissionError` otherwise (`shared/mcp_server.py:653-658`).

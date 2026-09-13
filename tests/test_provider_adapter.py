@@ -82,6 +82,128 @@ def test_text_to_video_settings_map_provider_fields() -> None:
     }
 
 
+def test_text_to_video_settings_map_snake_case_provider_fields() -> None:
+    assert _settings(
+        {
+            "operation": "text_to_video",
+            "params": {
+                "model": "t2v_2_2",
+                "prompt": "ocean",
+                "negative_prompt": "text",
+                "resolution": "832x480",
+                "num_frames": 81,
+                "num_inference_steps": 20,
+                "guidance_scale": 4.5,
+                "seed": 7,
+            },
+        }
+    ) == {
+        "model_type": "t2v_2_2",
+        "prompt": "ocean",
+        "negative_prompt": "text",
+        "resolution": "832x480",
+        "video_length": 81,
+        "num_inference_steps": 20,
+        "guidance_scale": 4.5,
+        "seed": 7,
+    }
+
+
+def test_snake_case_provider_fields_take_precedence_over_legacy_aliases() -> None:
+    settings = _settings(
+        {
+            "operation": "text_to_video",
+            "params": {
+                "model": "t2v_2_2",
+                "prompt": "ocean",
+                "negative_prompt": "canonical",
+                "negativePrompt": "legacy",
+                "num_frames": 81,
+                "numFrames": 9,
+            },
+        }
+    )
+    assert settings["negative_prompt"] == "canonical"
+    assert settings["video_length"] == 81
+
+
+@pytest.mark.parametrize(
+    ("resolution", "aspect_ratio", "expected"),
+    [
+        ("720p", None, "1280x720"),
+        ("720p", "16:9", "1280x720"),
+        ("720p", "9:16", "720x1280"),
+        ("720p", "1:1", "720x720"),
+    ],
+)
+def test_standard_resolution_is_normalized_with_aspect_ratio(
+    resolution: str, aspect_ratio: str | None, expected: str
+) -> None:
+    settings = _settings(
+        {
+            "operation": "text_to_video",
+            "params": {
+                "model": "t2v_2_2",
+                "prompt": "ocean",
+                "resolution": resolution,
+                "aspect_ratio": aspect_ratio,
+            },
+        }
+    )
+    assert settings["resolution"] == expected
+
+
+def test_explicit_resolution_is_preserved_with_aspect_ratio() -> None:
+    settings = _settings(
+        {
+            "operation": "text_to_video",
+            "params": {
+                "model": "t2v_2_2",
+                "prompt": "ocean",
+                "resolution": "832x480",
+                "aspect_ratio": "9:16",
+            },
+        }
+    )
+    assert settings["resolution"] == "832x480"
+
+
+def test_camel_case_aspect_ratio_is_supported() -> None:
+    settings = _settings(
+        {
+            "operation": "text_to_video",
+            "params": {
+                "model": "t2v_2_2",
+                "prompt": "ocean",
+                "resolution": "720p",
+                "aspectRatio": "9:16",
+            },
+        }
+    )
+    assert settings["resolution"] == "720x1280"
+
+
+def test_null_snake_case_fields_fall_back_to_legacy_aliases() -> None:
+    settings = _settings(
+        {
+            "operation": "text_to_video",
+            "params": {
+                "model": "t2v_2_2",
+                "prompt": "ocean",
+                "negative_prompt": None,
+                "negativePrompt": "legacy negative",
+                "num_frames": None,
+                "numFrames": 81,
+                "guidance_scale": None,
+                "guidanceScale": 4.5,
+            },
+        }
+    )
+    assert settings["negative_prompt"] == "legacy negative"
+    assert settings["video_length"] == 81
+    assert settings["guidance_scale"] == 4.5
+
+
 def test_image_to_video_settings_use_input_path(tmp_path: Path) -> None:
     image = tmp_path / "input.png"
     image.write_bytes(b"png")

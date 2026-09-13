@@ -87,13 +87,14 @@ def video_settings(
     settings: dict[str, Any] = {
         "model_type": model_type,
         "prompt": prompt,
-        "negative_prompt": negative_prompt,
         "resolution": resolution_string(width, height),
         "video_length": num_frames,
         "force_fps": fps,
         "num_inference_steps": num_inference_steps,
         "seed": seed,
     }
+    if negative_prompt:
+        settings["negative_prompt"] = negative_prompt
     if image_start is not None:
         settings["image_start"] = image_start
         settings["image_prompt_type"] = IMAGE_PROMPT_TYPE_START

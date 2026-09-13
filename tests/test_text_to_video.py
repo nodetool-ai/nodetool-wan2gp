@@ -73,6 +73,14 @@ async def test_process_sends_the_expected_settings(
     ]
 
 
+async def test_process_omits_empty_negative_prompt(
+    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
+):
+    await a_node(server_url).process(context)
+
+    assert fake_server.args_for("wangp_generate") == [fixture("text_to_video_default_request")]
+
+
 async def test_process_posts_progress(
     server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
 ):

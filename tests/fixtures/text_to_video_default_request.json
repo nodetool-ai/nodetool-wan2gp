@@ -1,0 +1,12 @@
+{
+  "source": {
+    "model_type": "t2v_2_2",
+    "prompt": "A large orange octopus is seen resting on the bottom of the ocean floor.",
+    "resolution": "832x480",
+    "video_length": 81,
+    "force_fps": 16,
+    "num_inference_steps": 30,
+    "seed": -1
+  },
+  "wait": false
+}

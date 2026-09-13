@@ -29,6 +29,13 @@ streams the resulting video bytes over its existing authenticated protocol.
 WanGP progress callbacks are relayed as provider progress frames. No WanGP code
 is imported into the NodeTool environment and no upstream source is modified.
 
+Generation parameters accept NodeTool's snake_case names and their camelCase
+aliases. A non-null snake_case value takes precedence when both are supplied.
+For resolution tiers such as `720p`, the adapter treats the number as the short
+side and uses `aspect_ratio` (or `aspectRatio`), defaulting to `16:9`. Thus `720p`
+becomes `1280x720`, or `720x1280` with `9:16`; calculated dimensions are rounded
+to whole pixels. Explicit dimensions such as `832x480` pass through unchanged.
+
 ## Runtime configuration
 
 Starting the container requires both:

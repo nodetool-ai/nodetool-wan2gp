@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -111,6 +112,48 @@ def _video_models(session: Any) -> list[dict[str, Any]]:
     return models
 
 
+def _param(params: dict[str, Any], name: str, legacy_name: str) -> Any:
+    """Read a canonical snake_case field, falling back to its legacy alias."""
+    value = params.get(name)
+    if value is not None:
+        return value
+    return params.get(legacy_name)
+
+
+def _normalize_resolution(value: Any, aspect_ratio: Any) -> Any:
+    """Convert provider resolution tiers to the WxH form expected by WanGP.
+
+    WanGP's provider settings require a dimension string.  This adapter treats
+    common provider tiers as the short side (for example, ``720p``), with an
+    optional aspect ratio.  Explicit dimension strings are passed through so
+    model-specific sizes continue to work unchanged.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    match = re.fullmatch(r"(\d+)\s*[pP]", text)
+    if match is None:
+        return value
+
+    short_side = int(match.group(1))
+    ratio_text = str(aspect_ratio or "16:9").strip()
+    ratio_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)", ratio_text)
+    if ratio_match is None:
+        raise ValueError(f"Invalid video aspect ratio: {aspect_ratio!r}")
+    ratio_width = float(ratio_match.group(1))
+    ratio_height = float(ratio_match.group(2))
+    if ratio_width <= 0 or ratio_height <= 0:
+        raise ValueError(f"Invalid video aspect ratio: {aspect_ratio!r}")
+
+    if ratio_width >= ratio_height:
+        width = round(short_side * ratio_width / ratio_height)
+        height = short_side
+    else:
+        width = short_side
+        height = round(short_side * ratio_height / ratio_width)
+    return f"{width}x{height}"
+
+
 def _settings(request: dict[str, Any]) -> dict[str, Any]:
     params = request.get("params")
     if not isinstance(params, dict):
@@ -127,20 +170,26 @@ def _settings(request: dict[str, Any]) -> dict[str, Any]:
         "prompt": str(params.get("prompt") or ""),
     }
     mappings = {
-        "negativePrompt": "negative_prompt",
+        "negative_prompt": "negativePrompt",
         "resolution": "resolution",
-        "guidanceScale": "guidance_scale",
-        "numInferenceSteps": "num_inference_steps",
+        "guidance_scale": "guidanceScale",
+        "num_inference_steps": "numInferenceSteps",
         "seed": "seed",
     }
-    for source, target in mappings.items():
-        value = params.get(source)
+    for target, legacy_name in mappings.items():
+        value = _param(params, target, legacy_name)
         if value is not None:
-            settings[target] = value
-    if params.get("numFrames") is not None:
-        settings["video_length"] = int(params["numFrames"])
-    elif params.get("durationSeconds") is not None:
-        settings["video_length"] = f"{float(params['durationSeconds']):g}s"
+            settings[target] = (
+                _normalize_resolution(value, _param(params, "aspect_ratio", "aspectRatio"))
+                if target == "resolution"
+                else value
+            )
+    num_frames = _param(params, "num_frames", "numFrames")
+    duration_seconds = _param(params, "duration_seconds", "durationSeconds")
+    if num_frames is not None:
+        settings["video_length"] = int(num_frames)
+    elif duration_seconds is not None:
+        settings["video_length"] = f"{float(duration_seconds):g}s"
 
     if request["operation"] == "image_to_video":
         image_path = Path(str(request.get("image_path") or "")).resolve()

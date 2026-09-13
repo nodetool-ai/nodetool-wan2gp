@@ -29,7 +29,6 @@ def test_server_url_resolves_at_execution_time(monkeypatch):
 TEXT_TO_VIDEO_DEFAULTS = {
     "model_type": "t2v_2_2",
     "prompt": "A large orange octopus is seen resting on the bottom of the ocean floor.",
-    "negative_prompt": "",
     "resolution": "832x480",
     "video_length": 81,
     "force_fps": 16,
@@ -40,7 +39,6 @@ TEXT_TO_VIDEO_DEFAULTS = {
 IMAGE_TO_VIDEO_DEFAULTS = {
     "model_type": "i2v_2_2",
     "prompt": "The camera slowly pushes in as the scene comes to life.",
-    "negative_prompt": "",
     "resolution": "832x480",
     "video_length": 81,
     "force_fps": 16,
@@ -178,6 +176,23 @@ def test_video_settings_place_the_loras_after_the_image_keys():
     assert settings["activated_loras"] == ["a.safetensors"]
     assert settings["loras_multipliers"] == "2"
     assert settings["image_prompt_type"] == "S"
+
+
+def test_video_settings_omit_an_empty_negative_prompt():
+    settings = video_settings(
+        model_type="t2v_2_2",
+        prompt="p",
+        negative_prompt="",
+        width=832,
+        height=480,
+        num_frames=81,
+        fps=16,
+        num_inference_steps=30,
+        seed=-1,
+        loras=[],
+        lora_multipliers=[],
+    )
+    assert "negative_prompt" not in settings
 
 
 def test_generate_merges_user_settings_over_the_model_defaults():
