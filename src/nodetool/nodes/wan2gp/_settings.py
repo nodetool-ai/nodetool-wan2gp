@@ -15,6 +15,9 @@ RESOLUTION_MULTIPLE = 16
 # The image_prompt_type flag that means "start from image_start".
 IMAGE_PROMPT_TYPE_START = "S"
 
+# The video_prompt_type flag that means "use video_guide as the control video".
+VIDEO_PROMPT_TYPE_GUIDE = "V"
+
 # Reserved API metadata, not a generation setting. Stripped from user input.
 API_KEY = "_api"
 
@@ -120,12 +123,31 @@ def merged_settings(
     Precedence, lowest first: the model's own defaults, then ``seed`` from the
     node, then the user's settings dict, then any media ids this node uploaded.
     ``model_type`` is a node field, so it always wins. ``_api`` is removed from
-    the user's dict only.
+    the user's dict only. An uploaded ``image_start`` adds ``S`` to
+    ``image_prompt_type`` and an uploaded ``video_guide`` adds ``V`` to
+    ``video_prompt_type``, unless the user's dict sets that key.
     """
     settings: dict[str, Any] = dict(defaults)
     settings["seed"] = seed
-    settings.update(strip_api(user_settings))
+    user = strip_api(user_settings)
+    settings.update(user)
     if media:
         settings.update(media)
+        # Wan2GP ignores an uploaded image or guide video unless the matching
+        # prompt type carries its flag. An explicit user value wins.
+        if "image_start" in media and "image_prompt_type" not in user:
+            settings["image_prompt_type"] = _with_flag(
+                settings.get("image_prompt_type"), IMAGE_PROMPT_TYPE_START
+            )
+        if "video_guide" in media and "video_prompt_type" not in user:
+            settings["video_prompt_type"] = _with_flag(
+                settings.get("video_prompt_type"), VIDEO_PROMPT_TYPE_GUIDE
+            )
     settings["model_type"] = model_type
     return settings
+
+
+def _with_flag(value: Any, flag: str) -> str:
+    """Return a prompt-type string that contains ``flag``."""
+    text = value if isinstance(value, str) else ""
+    return text if flag in text else text + flag

@@ -31,10 +31,21 @@ config_dir="${WANGP_CONFIG_DIR:-${workspace_dir}/wan2gp/config}"
 model_dir="${WANGP_MODEL_DIR:-${workspace_dir}/wan2gp/models}"
 output_dir="${WANGP_OUTPUT_DIR:-${workspace_dir}/wan2gp/outputs}"
 config_path="${config_dir}/wgp_config.json"
+export WANGP_CONFIG_DIR="${config_dir}"
+export WANGP_MODEL_DIR="${model_dir}"
+export WANGP_OUTPUT_DIR="${output_dir}"
 export WANGP_CONFIG_PATH="${config_path}"
 export HF_HOME="${HF_HOME:-${workspace_dir}/cache/huggingface}"
 
 mkdir -p "${config_dir}" "${model_dir}" "${output_dir}" "${HF_HOME}"
+
+# WanGP downloads weights into its ckpts directory, which the image links to the
+# default model directory. Point it at the configured one so downloads land on
+# the mounted volume and match what download telemetry watches.
+wangp_ckpts="${WANGP_ROOT:-/opt/Wan2GP}/ckpts"
+if [[ -L "${wangp_ckpts}" && "$(readlink "${wangp_ckpts}")" != "${model_dir}" ]]; then
+    ln -sfn "${model_dir}" "${wangp_ckpts}"
+fi
 
 # WanGP owns its config schema and creates a complete default file when none is
 # present. Archive the incomplete three-key file produced by combined images

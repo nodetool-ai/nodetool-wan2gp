@@ -42,11 +42,11 @@ class Generate(_Wan2GPNode):
     )
     image: ImageRef | None = Field(
         default=None,
-        description="Optional starting image. It is uploaded to the Wan2GP gallery and passed as image_start.",
+        description="Optional starting image. It is uploaded to the Wan2GP gallery and passed as image_start, and S is added to image_prompt_type unless settings sets it.",
     )
     video: VideoRef | None = Field(
         default=None,
-        description="Optional guide video. It is uploaded to the Wan2GP gallery and passed as video_guide.",
+        description="Optional guide video. It is uploaded to the Wan2GP gallery and passed as video_guide, and V is added to video_prompt_type unless settings sets it.",
     )
 
     @classmethod

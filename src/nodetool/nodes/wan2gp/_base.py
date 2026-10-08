@@ -88,6 +88,7 @@ class _Wan2GPNode(BaseNode):
     )
     timeout_seconds: int = Field(
         default=1800,
+        ge=1,
         description="How long to wait for one generation before giving up, in seconds.",
     )
     max_media_bytes: int = Field(

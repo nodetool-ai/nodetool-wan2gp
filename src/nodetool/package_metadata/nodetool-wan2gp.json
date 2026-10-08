@@ -58,6 +58,7 @@
         {
           "default": 1800,
           "description": "How long to wait for one generation before giving up, in seconds.",
+          "min": 1.0,
           "name": "timeout_seconds",
           "title": "Timeout Seconds",
           "type": {
@@ -112,7 +113,7 @@
         },
         {
           "default": null,
-          "description": "Optional starting image. It is uploaded to the Wan2GP gallery and passed as image_start.",
+          "description": "Optional starting image. It is uploaded to the Wan2GP gallery and passed as image_start, and S is added to image_prompt_type unless settings sets it.",
           "name": "image",
           "title": "Image",
           "type": {
@@ -122,7 +123,7 @@
         },
         {
           "default": null,
-          "description": "Optional guide video. It is uploaded to the Wan2GP gallery and passed as video_guide.",
+          "description": "Optional guide video. It is uploaded to the Wan2GP gallery and passed as video_guide, and V is added to video_prompt_type unless settings sets it.",
           "name": "video",
           "title": "Video",
           "type": {
@@ -186,6 +187,7 @@
         {
           "default": 1800,
           "description": "How long to wait for one generation before giving up, in seconds.",
+          "min": 1.0,
           "name": "timeout_seconds",
           "title": "Timeout Seconds",
           "type": {
@@ -379,6 +381,7 @@
         {
           "default": 1800,
           "description": "How long to wait for one generation before giving up, in seconds.",
+          "min": 1.0,
           "name": "timeout_seconds",
           "title": "Timeout Seconds",
           "type": {

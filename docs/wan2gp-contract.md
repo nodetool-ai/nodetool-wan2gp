@@ -277,6 +277,19 @@ t2v models allow `TVL` only (`models/wan/wan_handler.py:964-965`), so they take 
 `image_start`. Flags outside a model's allowed set are stripped during settings
 migration (`wgp.py:3181-3185`).
 
+## `video_prompt_type` for a guide video
+
+Wan2GP reads `video_guide` only when `video_prompt_type` contains `V`, the
+control-video flag. The combined adapter selects a `V` choice from the model's
+`guide_preprocessing` metadata for the same reason. The MCP `Generate` node has
+no metadata view, so when it uploads a guide video it appends `V` to the
+model's default `video_prompt_type` (the t2v and i2v defaults are `""`). How a
+bare `V` without a preprocessing letter is processed was not checked against
+the pinned Wan2GP revision. The same rule
+appends `S` to `image_prompt_type` for an uploaded `image_start`. A
+`video_prompt_type` or `image_prompt_type` key in the node's `settings` dict
+wins over both, so expert modes such as `PV` or `UV` stay available.
+
 ## Settings keys this package writes
 
 | Key | Value |
@@ -291,6 +304,7 @@ migration (`wgp.py:3181-3185`).
 | `seed` | int, `-1` for random |
 | `image_start` | gallery `media_id` |
 | `image_prompt_type` | `"S"` for an image-to-video run |
+| `video_prompt_type` | `Generate` only: the model default plus `"V"` when a guide video is uploaded |
 | `activated_loras` | list of ids from `wangp_list_loras` |
 | `loras_multipliers` | matching weights as one space separated string |
 

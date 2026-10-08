@@ -244,6 +244,42 @@ def test_generate_media_ids_win_over_user_settings():
     assert merged["image_start"] == "visual:abc"
 
 
+def test_generate_guide_video_enables_the_control_video_flag():
+    merged = merged_settings(
+        defaults={"video_prompt_type": "", "image_prompt_type": ""},
+        model_type="t2v_2_2",
+        seed=-1,
+        user_settings={},
+        media={"video_guide": "visual:v", "image_start": "visual:i"},
+    )
+    assert merged["video_prompt_type"] == "V"
+    assert merged["image_prompt_type"] == "S"
+
+
+def test_generate_keeps_existing_prompt_type_flags():
+    merged = merged_settings(
+        defaults={"video_prompt_type": "PV", "image_prompt_type": "SE"},
+        model_type="vace_14B",
+        seed=-1,
+        user_settings={},
+        media={"video_guide": "visual:v", "image_start": "visual:i"},
+    )
+    assert merged["video_prompt_type"] == "PV"
+    assert merged["image_prompt_type"] == "SE"
+
+
+def test_generate_explicit_prompt_types_win_over_the_media_flags():
+    merged = merged_settings(
+        defaults={},
+        model_type="vace_14B",
+        seed=-1,
+        user_settings={"video_prompt_type": "UV", "image_prompt_type": ""},
+        media={"video_guide": "visual:v", "image_start": "visual:i"},
+    )
+    assert merged["video_prompt_type"] == "UV"
+    assert merged["image_prompt_type"] == ""
+
+
 def test_generate_model_type_field_wins_over_user_settings():
     merged = merged_settings(
         defaults={"model_type": "t2v"},

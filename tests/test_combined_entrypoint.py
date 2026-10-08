@@ -38,3 +38,40 @@ def test_combined_image_installs_worker_runtime_dependencies() -> None:
 def test_combined_image_uses_a40_compatible_pytorch_wheels() -> None:
     assert "https://download.pytorch.org/whl/cu128" in DOCKERFILE
     assert "https://download.pytorch.org/whl/cu130" not in DOCKERFILE
+
+
+def _healthcheck_module():
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "scripts/combined-healthcheck.py"
+    spec = importlib.util.spec_from_file_location("combined_healthcheck", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_healthcheck_connects_to_the_configured_worker_host(monkeypatch) -> None:
+    healthcheck = _healthcheck_module()
+    for host, expected in [
+        (None, "127.0.0.1"),
+        ("0.0.0.0", "127.0.0.1"),
+        ("::", "127.0.0.1"),
+        ("10.0.0.5", "10.0.0.5"),
+        ("fd00::5", "[fd00::5]"),
+    ]:
+        if host is None:
+            monkeypatch.delenv("NODETOOL_WORKER_HOST", raising=False)
+        else:
+            monkeypatch.setenv("NODETOOL_WORKER_HOST", host)
+        assert healthcheck.worker_host() == expected
+
+
+def test_workspace_dir_controls_every_data_path() -> None:
+    # Hard-set image ENV values would make the WORKSPACE_DIR fallbacks dead code.
+    env_block = DOCKERFILE.split("ENV WANGP_ROOT=", 1)[1].split("\n\n", 1)[0]
+    for name in ("WANGP_CONFIG_DIR", "WANGP_MODEL_DIR", "WANGP_OUTPUT_DIR", "HF_HOME"):
+        assert f"{name}=" not in env_block
+    for name in ("WANGP_CONFIG_DIR", "WANGP_MODEL_DIR", "WANGP_OUTPUT_DIR"):
+        assert f'export {name}="${{' in ENTRYPOINT
+    assert 'ln -sfn "${model_dir}" "${wangp_ckpts}"' in ENTRYPOINT
