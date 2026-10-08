@@ -72,6 +72,14 @@ export WAN2GP_MCP_URL=http://127.0.0.1:7866/mcp
 
 Without it they fall back to `http://127.0.0.1:7866/mcp`. An explicit non-blank
 `server_url` on a node always takes precedence, so it can reach a second machine.
+Loopback and private LAN addresses are allowed because Wan2GP runs on hardware
+you control. Link-local addresses and cloud metadata hosts, such as
+`169.254.169.254` and `metadata.google.internal`, are rejected.
+
+A failed poll, such as a proxy 502 during a long generation, is retried over a
+fresh MCP session with exponential backoff, up to five failures in a row. When
+a node gives up, times out, or is cancelled, it sends `wangp_cancel_job`, over
+a new session if the old one died.
 
 ## Combined non-commercial GPU image
 
@@ -95,7 +103,9 @@ docker run --gpus all --rm -p 7777:7777 \
 Set the same `NODETOOL_WORKER_TOKEN` in the external NodeTool main process. The
 worker stores WanGP configuration in `/workspace/wan2gp/config`, model weights
 in `/workspace/wan2gp/models`, generated files in `/workspace/wan2gp/outputs`,
-and Hugging Face cache data in `/workspace/cache/huggingface`. Review each
+and Hugging Face cache data in `/workspace/cache/huggingface`. To keep data on
+a volume mounted elsewhere, set `WORKSPACE_DIR` to its path. `WANGP_CONFIG_DIR`,
+`WANGP_MODEL_DIR`, `WANGP_OUTPUT_DIR` and `HF_HOME` override single paths. Review each
 model's separate license. This image is only for free, non-monetized use.
 Read [the combined-image license and attribution notes](docs/combined-image-licenses.md)
 before building, running, or redistributing it.

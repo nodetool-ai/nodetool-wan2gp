@@ -289,12 +289,18 @@ def _normalize_resolution(value: Any, aspect_ratio: Any) -> Any:
         raise ValueError(f"Invalid video aspect ratio: {aspect_ratio!r}")
 
     if ratio_width >= ratio_height:
-        width = round(short_side * ratio_width / ratio_height)
+        width = short_side * ratio_width / ratio_height
         height = short_side
     else:
         width = short_side
-        height = round(short_side * ratio_height / ratio_width)
-    return f"{width}x{height}"
+        height = short_side * ratio_height / ratio_width
+    # WanGP's latent grid needs both sides to be multiples of 16.
+    return f"{_snap_to_grid(width)}x{_snap_to_grid(height)}"
+
+
+def _snap_to_grid(value: float) -> int:
+    """Round one side to the nearest positive multiple of 16."""
+    return max(16, round(value / 16) * 16)
 
 
 def _model_id(request: dict[str, Any]) -> str:

@@ -11,6 +11,8 @@ share one base URL. See docs/wan2gp-contract.md for the tool shapes.
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import json
 import tempfile
 import time
@@ -38,6 +40,12 @@ MAX_MEDIA_BYTES = 8 * 1024**3
 MEDIA_SPOOL_MEMORY_BYTES = 1 * 1024**2
 #: Cancellation is best effort and must never hold up node shutdown.
 CANCEL_TIMEOUT_SECONDS = 5.0
+#: Consecutive failed polls tolerated before a generation is abandoned.
+POLL_RETRY_ATTEMPTS = 5
+#: First delay after a failed poll. Each further failure doubles it.
+POLL_RETRY_BASE_SECONDS = 1.0
+#: Longest delay between two retried polls.
+POLL_RETRY_MAX_SECONDS = 15.0
 
 # Extensions Wan2GP's gallery accepts, from shared/mcp_server.py.
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
@@ -69,11 +77,44 @@ def media_type_for(filename: str) -> str:
     )
 
 
+# Cloud metadata services. Wan2GP is never served from one.
+_METADATA_HOSTS = {"metadata", "metadata.google.internal", "metadata.goog"}
+_METADATA_ADDRESSES = {
+    ipaddress.ip_address("100.100.100.200"),  # Alibaba Cloud
+    ipaddress.ip_address("fd00:ec2::254"),  # AWS IMDS over IPv6
+}
+
+
+def _check_server_host(host: str) -> None:
+    """Reject link-local and cloud metadata hosts.
+
+    Wan2GP is a server the user runs, usually on the same machine or the LAN,
+    so loopback and private addresses stay allowed. A workflow on a shared
+    worker could otherwise point server_url at the instance metadata service.
+    Only literal addresses and well-known names are checked. A DNS name that
+    resolves to a metadata address is not caught.
+    """
+    name = host.strip("[]").rstrip(".").lower()
+    if name in _METADATA_HOSTS:
+        raise Wan2GPError(f"Wan2GP server_url must not point at a metadata service: {host}")
+    try:
+        address = ipaddress.ip_address(name.split("%", 1)[0])
+    except ValueError:
+        return
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    if address.is_link_local or address in _METADATA_ADDRESSES:
+        raise Wan2GPError(
+            f"Wan2GP server_url must not point at a link-local or metadata address: {host}"
+        )
+
+
 def _origin_of(server_url: str) -> str:
     """Return the origin that Wan2GP's relative transfer URLs resolve against."""
     parsed = httpx.URL(server_url)
     if parsed.scheme not in ("http", "https") or not parsed.host:
         raise Wan2GPError("Wan2GP server_url must be an http or https URL.")
+    _check_server_host(parsed.host)
     return str(parsed.copy_with(raw_path=b"/", query=None, fragment=None))
 
 
@@ -103,6 +144,13 @@ def _content_length(response: httpx.Response) -> int | None:
     if length < 0:
         raise Wan2GPError("Wan2GP returned a negative Content-Length header.")
     return length
+
+
+def _unwrap_group(exc: BaseException) -> BaseException:
+    """Return the single error inside nested task-group exception groups."""
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
 
 
 def _text_payload(result: CallToolResult) -> str | None:
@@ -193,48 +241,89 @@ class Wan2GPClient:
             )
         self.max_transfer_bytes = max_transfer_bytes
         self._httpx_client_factory = httpx_client_factory
-        self._stack: AsyncExitStack | None = None
+        self._owner: asyncio.Task[None] | None = None
+        self._closing: asyncio.Event | None = None
         self._session: ClientSession | None = None
         self._media_client: httpx.AsyncClient | None = None
 
     # -- connection ------------------------------------------------------
 
     async def connect(self) -> "Wan2GPClient":
-        """Open the transport and complete the MCP handshake."""
+        """Open the transport and complete the MCP handshake.
+
+        The transport runs in its own task. The MCP SDK runs each request in a
+        task group, so a failed HTTP request (a proxy 502, a dropped
+        connection) cancels that group's host task. Hosting it here keeps that
+        cancellation away from the caller, which sees a ``ConnectionError``
+        from ``call_tool`` instead and can reconnect.
+        """
         if self._session is not None:
             return self
-        stack = AsyncExitStack()
+        ready: asyncio.Future[tuple[ClientSession, httpx.AsyncClient]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        closing = asyncio.Event()
+        owner = asyncio.create_task(self._run_transport(ready, closing))
         try:
-            read_stream, write_stream, _get_session_id = await stack.enter_async_context(
-                streamablehttp_client(
-                    self.server_url,
-                    timeout=REQUEST_TIMEOUT_SECONDS,
-                    sse_read_timeout=max(SSE_READ_TIMEOUT_SECONDS, self.timeout),
-                    httpx_client_factory=self._httpx_client_factory,
-                )
-            )
-            session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-            await session.initialize()
-            self._media_client = await stack.enter_async_context(
-                self._httpx_client_factory(timeout=httpx.Timeout(REQUEST_TIMEOUT_SECONDS))
-            )
-            # Factories supplied by callers may choose a different default.
-            # Transfer tickets are one-use URLs, so redirects are never safe.
-            self._media_client.follow_redirects = False
+            session, media_client = await asyncio.shield(ready)
         except BaseException:
-            await stack.aclose()
+            closing.set()
+            owner.cancel()
+            await asyncio.gather(owner, return_exceptions=True)
             raise
-        self._stack = stack
+        self._owner = owner
+        self._closing = closing
         self._session = session
+        self._media_client = media_client
         return self
+
+    async def _run_transport(
+        self,
+        ready: asyncio.Future[tuple[ClientSession, httpx.AsyncClient]],
+        closing: asyncio.Event,
+    ) -> None:
+        """Own the MCP transport from the handshake until ``close``."""
+        try:
+            async with AsyncExitStack() as stack:
+                read_stream, write_stream, _get_session_id = await stack.enter_async_context(
+                    streamablehttp_client(
+                        self.server_url,
+                        timeout=REQUEST_TIMEOUT_SECONDS,
+                        sse_read_timeout=max(SSE_READ_TIMEOUT_SECONDS, self.timeout),
+                        httpx_client_factory=self._httpx_client_factory,
+                    )
+                )
+                session = await stack.enter_async_context(
+                    ClientSession(read_stream, write_stream)
+                )
+                await session.initialize()
+                media_client = await stack.enter_async_context(
+                    self._httpx_client_factory(timeout=httpx.Timeout(REQUEST_TIMEOUT_SECONDS))
+                )
+                # Factories supplied by callers may choose a different default.
+                # Transfer tickets are one-use URLs, so redirects are never safe.
+                media_client.follow_redirects = False
+                ready.set_result((session, media_client))
+                await closing.wait()
+        except BaseException as exc:
+            # Before the handshake completes, connect() reports the failure.
+            # After it, the failure surfaces from call_tool, which watches
+            # this task.
+            if not ready.done():
+                if isinstance(exc, asyncio.CancelledError):
+                    ready.cancel()
+                else:
+                    ready.set_exception(_unwrap_group(exc))
 
     async def close(self) -> None:
         """Close the transport."""
-        stack, self._stack = self._stack, None
+        owner, self._owner = self._owner, None
+        closing, self._closing = self._closing, None
         self._session = None
         self._media_client = None
-        if stack is not None:
-            await stack.aclose()
+        if owner is not None and closing is not None:
+            closing.set()
+            await asyncio.gather(owner, return_exceptions=True)
 
     async def __aenter__(self) -> "Wan2GPClient":
         return await self.connect()
@@ -257,8 +346,25 @@ class Wan2GPClient:
     # -- tools -----------------------------------------------------------
 
     async def call_tool(self, name: str, args: dict[str, Any] | None = None) -> Any:
-        """Call one MCP tool and return its parsed return value."""
-        result = await self.session.call_tool(name, args or {})
+        """Call one MCP tool and return its parsed return value.
+
+        Raise ``ConnectionError`` and drop the session when the transport dies
+        before the call returns. The next call must reconnect first.
+        """
+        session = self.session
+        owner = self._owner
+        call = asyncio.ensure_future(session.call_tool(name, args or {}))
+        try:
+            if owner is not None:
+                await asyncio.wait({call, owner}, return_when=asyncio.FIRST_COMPLETED)
+            if not call.done():
+                await self.close()
+                raise ConnectionError(f"The Wan2GP MCP session closed during {name}.")
+            result = call.result()
+        finally:
+            if not call.done():
+                call.cancel()
+                await asyncio.gather(call, return_exceptions=True)
         return parse_tool_result(result, name)
 
     async def list_tools(self) -> list[str]:
@@ -336,7 +442,15 @@ class Wan2GPClient:
             raise Wan2GPError(
                 f"Wan2GP rejected the upload of {filename}: {response.status_code} {response.text}"
             )
-        record = response.json()
+        try:
+            record = response.json()
+        except ValueError as exc:
+            raise Wan2GPError(
+                f"Wan2GP answered the upload of {filename} with a body that is not JSON: "
+                f"{response.text[:200]}"
+            ) from exc
+        if not isinstance(record, dict):
+            raise Wan2GPError(f"Wan2GP answered the upload of {filename} with an invalid record.")
         media_id = str(record.get("media_id") or "").strip()
         if not media_id:
             raise Wan2GPError(f"Wan2GP accepted the upload of {filename} but returned no media_id.")
@@ -392,8 +506,44 @@ class Wan2GPClient:
         return await self.call_tool("wangp_get_job", args)
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
-        """Ask Wan2GP to cancel a job. Cancellation is cooperative."""
-        return await self.call_tool("wangp_cancel_job", {"job_id": job_id})
+        """Ask Wan2GP to cancel a job. Cancellation is cooperative.
+
+        A transport failure closes the MCP session for good, and that failure
+        is often why the caller is cancelling. The request then goes over a
+        fresh session, once.
+        """
+        args = {"job_id": job_id}
+        if self._session is not None:
+            try:
+                return await self.call_tool("wangp_cancel_job", args)
+            except Wan2GPError:
+                raise
+            except Exception:
+                await self.close()
+        await self.connect()
+        return await self.call_tool("wangp_cancel_job", args)
+
+    async def _recover_from_poll_failure(
+        self,
+        job_id: str,
+        error: Exception,
+        failures: int,
+        deadline: float | None,
+        sleep: Callable[[float], Awaitable[None]],
+    ) -> None:
+        """Back off after a failed poll and drop the session it may have killed.
+
+        The next poll reconnects. Raise once ``failures`` exceeds the limit.
+        """
+        if failures > POLL_RETRY_ATTEMPTS:
+            raise Wan2GPError(
+                f"Lost contact with Wan2GP while polling job {job_id}: {error!r}"
+            ) from error
+        await self.close()
+        delay = min(POLL_RETRY_BASE_SECONDS * 2 ** (failures - 1), POLL_RETRY_MAX_SECONDS)
+        if deadline is not None:
+            delay = min(delay, max(0.0, deadline - time.monotonic()))
+        await sleep(delay)
 
     async def poll_until_done(
         self,
@@ -408,6 +558,11 @@ class Wan2GPClient:
         ``on_progress`` receives each new progress payload, which carries
         ``phase``, ``status``, ``progress`` (0-100), ``current_step`` and
         ``total_steps``. It may be sync or async.
+
+        A failed poll, such as a proxy 502 or a dropped connection, is retried
+        over a fresh session with exponential backoff, up to
+        ``POLL_RETRY_ATTEMPTS`` failures in a row. A tool error from Wan2GP is
+        not retried.
         """
         if sleep is None:
             import anyio
@@ -415,6 +570,7 @@ class Wan2GPClient:
             sleep = anyio.sleep
         deadline = None if timeout is None else time.monotonic() + timeout
         last_progress: dict[str, Any] | None = None
+        failures = 0
         while True:
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
@@ -422,21 +578,31 @@ class Wan2GPClient:
                     f"Wan2GP job {job_id} did not finish within {timeout:g} seconds."
                 )
             try:
+                if self._session is None:
+                    await self.connect()
+                    remaining = None if deadline is None else deadline - time.monotonic()
                 if remaining is None:
                     job = await self.get_job(job_id)
                 else:
-                    import asyncio
-
-                    async with asyncio.timeout(remaining):
+                    async with asyncio.timeout(max(remaining, 0.0)):
                         job = await self.get_job(job_id)
-            except TimeoutError as exc:
+            except Wan2GPError:
+                raise
+            except Exception as exc:
                 # An HTTP client's own timeout is a poll failure, not the
                 # generation deadline, unless our deadline is now exhausted.
-                if deadline is None or time.monotonic() < deadline:
-                    raise
-                raise GenerationTimeoutError(
-                    f"Wan2GP job {job_id} did not finish within {timeout:g} seconds."
-                ) from exc
+                if (
+                    isinstance(exc, TimeoutError)
+                    and deadline is not None
+                    and time.monotonic() >= deadline
+                ):
+                    raise GenerationTimeoutError(
+                        f"Wan2GP job {job_id} did not finish within {timeout:g} seconds."
+                    ) from exc
+                failures += 1
+                await self._recover_from_poll_failure(job_id, exc, failures, deadline, sleep)
+                continue
+            failures = 0
             progress = progress_from_job(job)
             if progress is not None and progress != last_progress:
                 last_progress = progress

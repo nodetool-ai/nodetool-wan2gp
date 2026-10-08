@@ -133,6 +133,8 @@ async def test_process_uploads_an_optional_video_as_video_guide(
 
     source = fake_server.args_for("wangp_generate")[0]["source"]
     assert source["video_guide"] == "visual:0a1b2c3d4e5f"
+    # The t2v defaults carry an empty video_prompt_type, which ignores the guide.
+    assert source["video_prompt_type"] == "V"
     assert fake_server.args_for("wangp_create_gallery_upload") == [
         {"filename": "video.mp4"}
     ]

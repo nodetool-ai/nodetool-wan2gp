@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from nodetool.nodes.wan2gp._client import (
@@ -9,6 +10,7 @@ from nodetool.nodes.wan2gp._client import (
     GenerationTimeoutError,
     MAX_MEDIA_BYTES,
     MEDIA_SPOOL_MEMORY_BYTES,
+    POLL_RETRY_ATTEMPTS,
     SSE_READ_TIMEOUT_SECONDS,
     Wan2GPClient,
     Wan2GPError,
@@ -224,12 +226,13 @@ async def test_poll_until_done_times_out(server_url, client_factory, fake_server
 
 
 async def test_generation_timeout_cancels_remote_job(
-    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP
+    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP, monkeypatch
 ):
     fake_server.job_snapshots = [fixture("job_running")]
+    monkeypatch.setattr(wan2gp_nodes, "POLL_INTERVAL_SECONDS", 0.05)
     from nodetool.nodes.wan2gp.generate import Generate
 
-    node = Generate(server_url=server_url, timeout_seconds=0)
+    node = Generate(server_url=server_url, timeout_seconds=1)
     node._id = "g-timeout"
     with pytest.raises(Wan2GPError, match="did not finish within"):
         await node.process(context)
@@ -250,6 +253,139 @@ async def test_poll_bounds_a_slow_request_by_the_remaining_deadline(
     client.get_job = slow_get_job
     with pytest.raises(GenerationTimeoutError):
         await client.poll_until_done("job-1", timeout=0.01, sleep=lambda _: asyncio.sleep(0))
+
+
+async def test_poll_retries_a_transient_http_failure_over_a_fresh_session(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    fake_server.job_snapshots = [fixture("job_running"), fixture("job_done")]
+    fake_server.http_failures["wangp_get_job"] = 2
+    delays: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        delays.append(seconds)
+
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        job = await client.poll_until_done("job-1", timeout=60.0, sleep=record_sleep)
+
+    assert job["done"] is True
+    # Two backoffs (1 s, 2 s) between the failures, then the regular interval.
+    assert delays[:2] == [1.0, 2.0]
+    assert fake_server.initialize_count == 3
+
+
+async def test_poll_gives_up_after_bounded_retries(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    fake_server.http_failures["wangp_get_job"] = 100
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        with pytest.raises(Wan2GPError, match="Lost contact with Wan2GP"):
+            await client.poll_until_done("job-1", timeout=60.0, sleep=no_sleep)
+
+    polls = [r for r in fake_server.requests if r.get("tool") == "wangp_get_job"]
+    assert len(polls) == POLL_RETRY_ATTEMPTS + 1
+
+
+async def test_poll_does_not_retry_a_tool_error(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    fake_server.tool_errors["wangp_get_job"] = "Unknown job_id: job-1"
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        with pytest.raises(Wan2GPError, match="Unknown job_id"):
+            await client.poll_until_done("job-1", timeout=60.0, sleep=no_sleep)
+
+    assert len(fake_server.args_for("wangp_get_job")) == 1
+
+
+async def test_cancel_reaches_the_server_after_the_session_died(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    fake_server.http_failures["wangp_get_job"] = 1
+
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        with pytest.raises(Exception):
+            await client.get_job("job-1")
+        await client.cancel("job-1")
+
+    assert fake_server.cancelled_jobs == ["job-1"]
+    assert fake_server.initialize_count == 2
+
+
+async def test_failed_generation_cancels_the_remote_job_over_a_fresh_session(
+    server_url, context, wan2gp_nodes, fake_server: FakeWan2GP, monkeypatch
+):
+    from nodetool.nodes.wan2gp import _client
+
+    monkeypatch.setattr(_client, "POLL_RETRY_BASE_SECONDS", 0.0)
+    fake_server.http_failures["wangp_get_job"] = 100
+    from nodetool.nodes.wan2gp.generate import Generate
+
+    node = Generate(server_url=server_url)
+    node._id = "g-lost"
+    with pytest.raises(Wan2GPError, match="Lost contact with Wan2GP"):
+        await node.process(context)
+    assert fake_server.cancelled_jobs == ["3d9a1c0e5b7f4a2d8c6e0f1a2b3c4d5e"]
+
+
+def test_timeout_seconds_must_be_positive():
+    from pydantic import ValidationError
+
+    from nodetool.nodes.wan2gp.generate import Generate
+
+    with pytest.raises(ValidationError):
+        Generate(timeout_seconds=0)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254/latest/meta-data/",
+        "http://[fe80::1]:7866/mcp",
+        "http://[::ffff:169.254.169.254]/mcp",
+        "http://metadata.google.internal/computeMetadata/v1/",
+        "http://100.100.100.200/latest/meta-data/",
+        "http://[fd00:ec2::254]/latest/meta-data/",
+    ],
+)
+def test_server_url_rejects_link_local_and_metadata_hosts(url):
+    with pytest.raises(Wan2GPError, match="metadata"):
+        Wan2GPClient(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:7866/mcp",
+        "http://localhost:7866/mcp",
+        "http://[::1]:7866/mcp",
+        "http://192.168.1.20:7866/mcp",
+        "http://10.0.0.5:7866/mcp",
+        "https://wan2gp.example.com/mcp",
+    ],
+)
+def test_server_url_allows_loopback_and_lan_servers(url):
+    assert Wan2GPClient(url).server_url == url
+
+
+async def test_upload_rejects_a_non_json_success_body(server_url, client_factory):
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        original = client.media_client.request
+
+        async def html_ok(*args, **kwargs):
+            await original(*args, **kwargs)
+            return httpx.Response(200, text="<html>proxy</html>")
+
+        client.media_client.request = html_ok
+        with pytest.raises(Wan2GPError, match="not JSON"):
+            await client.upload_bytes("start.png", fixture_bytes("tiny.png"))
 
 
 async def test_cancel_requests_cancellation(server_url, client_factory, fake_server: FakeWan2GP):

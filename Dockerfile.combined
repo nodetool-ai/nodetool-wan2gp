@@ -83,15 +83,14 @@ RUN chmod 0755 /usr/local/bin/nodetool-wangp-entrypoint \
         /workspace/wan2gp/outputs /workspace/cache \
     && ln -s /workspace/wan2gp/models /opt/Wan2GP/ckpts
 
-ENV WANGP_CONFIG_DIR=/workspace/wan2gp/config \
-    WANGP_MODEL_DIR=/workspace/wan2gp/models \
-    WANGP_OUTPUT_DIR=/workspace/wan2gp/outputs \
-    WANGP_ROOT=/opt/Wan2GP \
+# WANGP_CONFIG_DIR, WANGP_MODEL_DIR, WANGP_OUTPUT_DIR and HF_HOME are derived
+# from WORKSPACE_DIR (default /workspace) by the entrypoint, so a volume mounted
+# elsewhere only needs WORKSPACE_DIR.
+ENV WANGP_ROOT=/opt/Wan2GP \
     NODETOOL_MODEL_PREPARE_COMMAND_WANGP="/opt/wan2gp-venv/bin/python /opt/nodetool-wan2gp-combined/prepare_model.py" \
     NODETOOL_PROVIDER_ADAPTER_COMMAND_WANGP="/opt/wan2gp-venv/bin/python /opt/nodetool-wan2gp-combined/provider_adapter.py" \
     NODETOOL_PROVIDER_ADAPTER_CAPABILITIES_WANGP="text_to_video,image_to_video,reference_to_video,text_to_image,image_to_image,text_to_audio,text_to_speech_encoded" \
     NODETOOL_PROVIDER_ADAPTER_DISPLAY_NAME_WANGP="WanGP" \
-    HF_HOME=/workspace/cache/huggingface \
     PYTHONUNBUFFERED=1 \
     SDL_AUDIODRIVER=dummy \
     PULSE_RUNTIME_PATH=/tmp/pulse-runtime

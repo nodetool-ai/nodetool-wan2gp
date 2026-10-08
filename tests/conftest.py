@@ -68,6 +68,11 @@ class FakeWan2GP:
         self.download_content_length: int | None | _DefaultContentLength = _DEFAULT_CONTENT_LENGTH
         # Tool name -> message. A listed tool answers with isError instead.
         self.tool_errors: dict[str, str] = {}
+        # Tool name -> how many more calls answer with HTTP 502, as a reverse
+        # proxy does when the backend hiccups. That kills the MCP session.
+        self.http_failures: dict[str, int] = {}
+        # How many MCP sessions were initialized.
+        self.initialize_count = 0
         self._get_job_index = 0
 
     # -- tool implementations -------------------------------------------
@@ -189,9 +194,15 @@ class FakeWan2GP:
         if path == "/mcp" and method == "POST":
             message = json.loads(body)
             record["rpc_method"] = message.get("method")
+            if message.get("method") == "initialize":
+                self.initialize_count += 1
             if message.get("method") == "tools/call":
                 record["tool"] = (message.get("params") or {}).get("name")
             self.requests.append(record)
+            if self.http_failures.get(record.get("tool", ""), 0) > 0:
+                self.http_failures[record["tool"]] -= 1
+                await _send(send, 502, b"Bad Gateway", "text/plain")
+                return
             response = self.handle_rpc(message)
             if response is None:
                 await _send(send, 202, b"", "text/plain")

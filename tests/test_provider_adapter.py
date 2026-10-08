@@ -216,6 +216,11 @@ def test_snake_case_provider_fields_take_precedence_over_legacy_aliases() -> Non
         ("720p", "16:9", "1280x720"),
         ("720p", "9:16", "720x1280"),
         ("720p", "1:1", "720x720"),
+        # Widths snap to WanGP's 16-pixel grid instead of 853 or 1120.33.
+        ("480p", "16:9", "848x480"),
+        ("480p", "21:9", "1120x480"),
+        ("480p", "9:16", "480x848"),
+        ("1080p", "16:9", "1920x1088"),
     ],
 )
 def test_standard_resolution_is_normalized_with_aspect_ratio(
