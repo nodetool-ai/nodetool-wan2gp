@@ -49,29 +49,42 @@ on a trusted network or behind an authenticated reverse proxy.
 
 ## Install the pack
 
-In the NodeTool environment, not the Wan2GP one:
+In the desktop app, open **Tools → Package Manager** and install the
+**Wan2GP** pack. NodeTool installs `nodetool-wan2gp` from PyPI into its own
+Python environment, setting up Python first if needed.
+
+Without the desktop app, install it from PyPI into the environment that runs
+the NodeTool Python worker, not the Wan2GP one:
 
 ```bash
-git clone https://github.com/nodetool-ai/nodetool-wan2gp.git
-cd nodetool-wan2gp
-pip install -e .
+pip install nodetool-wan2gp
 ```
 
-It requires `nodetool-core>=0.8.0` with its `audio` extra, `httpx`, and MCP
-`>=1.16,<2`. The audio extra provides the dependencies needed for
-`ProcessingContext` asset conversion. No PyTorch, no diffusers.
+It requires `nodetool-core>=0.8.1` with its `audio` extra, `httpx2`, and MCP
+`>=2.3,<3`. The audio extra provides the dependencies needed for
+`ProcessingContext` asset conversion. No PyTorch, no diffusers. To work on the
+pack itself, see [Development](#development).
 
 ## Point NodeTool at your server
 
-Set `WAN2GP_MCP_URL` before you run a workflow. Nodes with a blank `server_url`
-resolve this environment variable at execution time:
+Each node resolves the server URL when it runs, in this order:
+
+1. The node's `server_url` field, when it is not blank. This can reach a second
+   machine.
+2. `WAN2GP_MCP_URL`, set in NodeTool's Settings or in the environment.
+3. `http://127.0.0.1:7866/mcp`.
+
+The Python worker reads `WAN2GP_MCP_URL` from the environment NodeTool gives it
+when it starts, so set the variable before you start NodeTool, and restart
+NodeTool after changing it:
 
 ```bash
 export WAN2GP_MCP_URL=http://127.0.0.1:7866/mcp
+nodetool serve
 ```
 
-Without it they fall back to `http://127.0.0.1:7866/mcp`. An explicit non-blank
-`server_url` on a node always takes precedence, so it can reach a second machine.
+A desktop app launched from the Finder or the Start menu never sees a shell
+`export`. Set the URL in Settings there, or fill in the node's `server_url`.
 
 ## Combined non-commercial GPU image
 
@@ -92,8 +105,17 @@ docker run --gpus all --rm -p 7777:7777 \
   nodetool-wan2gp:combined
 ```
 
-Set the same `NODETOOL_WORKER_TOKEN` in the external NodeTool main process. The
-worker stores WanGP configuration in `/workspace/wan2gp/config`, model weights
+Then point the NodeTool main process at the container. `NODETOOL_WORKER_URL`
+selects the WebSocket transport. Without it, NodeTool starts its own local
+Python worker and never contacts the container:
+
+```bash
+export NODETOOL_WORKER_URL=ws://<gpu-host>:7777
+export NODETOOL_WORKER_TOKEN=<the token the container was started with>
+nodetool serve
+```
+
+The worker stores WanGP configuration in `/workspace/wan2gp/config`, model weights
 in `/workspace/wan2gp/models`, generated files in `/workspace/wan2gp/outputs`,
 and Hugging Face cache data in `/workspace/cache/huggingface`. Review each
 model's separate license. This image is only for free, non-monetized use.

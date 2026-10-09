@@ -84,8 +84,15 @@ def test_the_scan_finds_exactly_the_three_v1_nodes(scanned):
 
 def test_runtime_dependencies_are_compatible():
     dependencies = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
-    assert "nodetool-core[audio]>=0.8.0" in dependencies
-    assert "mcp>=1.16.0,<2.0.0" in dependencies
+    assert "nodetool-core[audio]>=0.8.1" in dependencies
+    assert "mcp>=2.3.0,<3" in dependencies
+    # mcp 2.x transports use httpx2; the media client shares their factory.
+    assert "httpx2>=2.13.1" in dependencies
+
+
+def test_the_namespace_entry_point_is_declared():
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]
+    assert project["entry-points"]["nodetool.namespaces"] == {"wan2gp": "wan2gp"}
 
 
 def test_the_scan_reports_no_warnings(scanned):

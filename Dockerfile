@@ -11,18 +11,23 @@
 # user runs. See NOTICE.md. Point the container at that server with
 # WAN2GP_MCP_URL, and note that 127.0.0.1 inside a container is the container.
 #
-# CORE_IMAGE: the locally-built `nodetool-core:local`, or a published
-#   ghcr.io/nodetool-ai/nodetool:<tag>.
-ARG CORE_IMAGE=nodetool-core:local
+# CORE_IMAGE: the published NodeTool Python worker image
+#   (ghcr.io/nodetool-ai/nodetool-worker:<version>, built from nodetool-core's
+#   Dockerfile), or a local build of that Dockerfile. It is micromamba-based:
+#   Python lives in $VIRTUAL_ENV (/opt/conda) and uv is on PATH. Do not use
+#   ghcr.io/nodetool-ai/nodetool, which is the TypeScript server image.
+ARG CORE_IMAGE=ghcr.io/nodetool-ai/nodetool-worker:0.8.1
 FROM ${CORE_IMAGE}
 
 USER root
 
-# Install this pack from the build context on top of core.
+# Install this pack from the build context into the worker's environment.
 COPY . /tmp/nodetool-wan2gp
-RUN /opt/venv/bin/python -m pip install \
+RUN test -x "$VIRTUAL_ENV/bin/python" \
+    && uv pip install \
+        --python "$VIRTUAL_ENV" \
         --index-url https://pypi.org/simple \
         /tmp/nodetool-wan2gp \
-    && rm -rf /tmp/nodetool-wan2gp /root/.cache/pip /tmp/* /var/tmp/*
+    && rm -rf /tmp/nodetool-wan2gp /root/.cache/uv /root/.cache/pip /tmp/* /var/tmp/*
 
 # EXPOSE 7777, HEALTHCHECK, and CMD are all inherited from the core image.

@@ -1,4 +1,4 @@
-"""A fake Wan2GP MCP server, served in-process over httpx.ASGITransport.
+"""A fake Wan2GP MCP server, served in-process over httpx2.ASGITransport.
 
 No sockets and no Wan2GP. The app answers the MCP streamable-HTTP handshake and
 the ``/wangp_api`` media transfer routes, and records every request so a test can
@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -272,17 +272,17 @@ def fake_server() -> FakeWan2GP:
 
 @pytest.fixture
 def client_factory(fake_server: FakeWan2GP):
-    """An httpx client factory the mcp client accepts, wired to the fake app."""
+    """An httpx2 client factory the mcp client accepts, wired to the fake app."""
 
     def factory(
         headers: dict[str, str] | None = None,
-        timeout: httpx.Timeout | None = None,
-        auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=fake_server),
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
+    ) -> httpx2.AsyncClient:
+        return httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=fake_server),
             headers=headers,
-            timeout=timeout if timeout is not None else httpx.Timeout(30.0),
+            timeout=timeout if timeout is not None else httpx2.Timeout(30.0),
             auth=auth,
             follow_redirects=True,
         )
