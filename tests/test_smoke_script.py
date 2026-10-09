@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 
 SMOKE_PATH = Path(__file__).resolve().parent.parent / "scripts" / "smoke.py"
@@ -60,7 +60,7 @@ def test_node_uses_the_small_settings(smoke):
 
 
 def test_connection_failure_reports_the_server_url(smoke, capsys):
-    error = BaseExceptionGroup("unhandled", [httpx.ConnectError("All attempts failed")])
+    error = BaseExceptionGroup("unhandled", [httpx2.ConnectError("All attempts failed")])
     smoke.report_failure(error, "http://127.0.0.1:7866/mcp")
     message = capsys.readouterr().err
     assert "cannot reach a Wan2GP MCP server at http://127.0.0.1:7866/mcp" in message

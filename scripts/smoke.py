@@ -143,10 +143,10 @@ def flatten(error: BaseException) -> list[BaseException]:
 
 def report_failure(error: BaseException, server_url: str) -> None:
     """Print one clear line about a failed run, then the detail."""
-    import httpx
+    import httpx2
 
     leaves = flatten(error)
-    connect = [leaf for leaf in leaves if isinstance(leaf, httpx.ConnectError)]
+    connect = [leaf for leaf in leaves if isinstance(leaf, httpx2.ConnectError)]
     if connect:
         print(
             f"\nFAILED: cannot reach a Wan2GP MCP server at {server_url}.\n"

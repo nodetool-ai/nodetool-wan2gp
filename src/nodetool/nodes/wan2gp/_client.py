@@ -19,9 +19,9 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import McpHttpClientFactory, create_mcp_http_client
 from mcp.types import CallToolResult, TextContent
 
@@ -71,7 +71,7 @@ def media_type_for(filename: str) -> str:
 
 def _origin_of(server_url: str) -> str:
     """Return the origin that Wan2GP's relative transfer URLs resolve against."""
-    parsed = httpx.URL(server_url)
+    parsed = httpx2.URL(server_url)
     if parsed.scheme not in ("http", "https") or not parsed.host:
         raise Wan2GPError("Wan2GP server_url must be an http or https URL.")
     return str(parsed.copy_with(raw_path=b"/", query=None, fragment=None))
@@ -92,7 +92,7 @@ def _ticket_limit(ticket: dict[str, Any], hard_limit: int) -> int:
     return limit
 
 
-def _content_length(response: httpx.Response) -> int | None:
+def _content_length(response: httpx2.Response) -> int | None:
     value = response.headers.get("content-length")
     if value is None:
         return None
@@ -126,10 +126,10 @@ def parse_tool_result(result: CallToolResult, tool_name: str) -> Any:
     other return value under a ``result`` key there. Both also arrive as JSON
     text, which is the fallback when a server omits structured content.
     """
-    if result.isError:
+    if result.is_error:
         raise Wan2GPError(_error_message(result, tool_name))
 
-    structured = result.structuredContent
+    structured = result.structured_content
     if structured is not None:
         if set(structured.keys()) == {"result"}:
             return structured["result"]
@@ -195,7 +195,7 @@ class Wan2GPClient:
         self._httpx_client_factory = httpx_client_factory
         self._stack: AsyncExitStack | None = None
         self._session: ClientSession | None = None
-        self._media_client: httpx.AsyncClient | None = None
+        self._media_client: httpx2.AsyncClient | None = None
 
     # -- connection ------------------------------------------------------
 
@@ -205,18 +205,23 @@ class Wan2GPClient:
             return self
         stack = AsyncExitStack()
         try:
-            read_stream, write_stream, _get_session_id = await stack.enter_async_context(
-                streamablehttp_client(
-                    self.server_url,
-                    timeout=REQUEST_TIMEOUT_SECONDS,
-                    sse_read_timeout=max(SSE_READ_TIMEOUT_SECONDS, self.timeout),
-                    httpx_client_factory=self._httpx_client_factory,
+            # mcp 2.x takes a ready client instead of a factory and timeouts.
+            # The read timeout keeps the event stream open for a long generation.
+            mcp_http_client = await stack.enter_async_context(
+                self._httpx_client_factory(
+                    timeout=httpx2.Timeout(
+                        REQUEST_TIMEOUT_SECONDS,
+                        read=max(SSE_READ_TIMEOUT_SECONDS, self.timeout),
+                    )
                 )
+            )
+            read_stream, write_stream = await stack.enter_async_context(
+                streamable_http_client(self.server_url, http_client=mcp_http_client)
             )
             session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
             self._media_client = await stack.enter_async_context(
-                self._httpx_client_factory(timeout=httpx.Timeout(REQUEST_TIMEOUT_SECONDS))
+                self._httpx_client_factory(timeout=httpx2.Timeout(REQUEST_TIMEOUT_SECONDS))
             )
             # Factories supplied by callers may choose a different default.
             # Transfer tickets are one-use URLs, so redirects are never safe.
@@ -249,7 +254,7 @@ class Wan2GPClient:
         return self._session
 
     @property
-    def media_client(self) -> httpx.AsyncClient:
+    def media_client(self) -> httpx2.AsyncClient:
         if self._media_client is None:
             raise Wan2GPError("The Wan2GP client is not connected. Call connect() first.")
         return self._media_client
@@ -259,6 +264,10 @@ class Wan2GPClient:
     async def call_tool(self, name: str, args: dict[str, Any] | None = None) -> Any:
         """Call one MCP tool and return its parsed return value."""
         result = await self.session.call_tool(name, args or {})
+        if not isinstance(result, CallToolResult):
+            raise Wan2GPError(
+                f"Wan2GP tool {name} returned an unsupported {type(result).__name__}."
+            )
         return parse_tool_result(result, name)
 
     async def list_tools(self) -> list[str]:
@@ -289,7 +298,7 @@ class Wan2GPClient:
 
     def _transfer_url(
         self, ticket: dict[str, Any], key: str, method: str
-    ) -> tuple[httpx.URL, int]:
+    ) -> tuple[httpx2.URL, int]:
         """Validate a one-use media ticket before making an HTTP request."""
         if not isinstance(ticket, dict):
             raise Wan2GPError("Wan2GP returned an invalid media transfer ticket.")
@@ -298,7 +307,7 @@ class Wan2GPClient:
         raw_url = ticket.get(key)
         if not isinstance(raw_url, str) or not raw_url or raw_url.startswith("//"):
             raise Wan2GPError("Wan2GP media transfer tickets must contain a relative URL.")
-        parsed = httpx.URL(raw_url)
+        parsed = httpx2.URL(raw_url)
         if parsed.scheme or parsed.host:
             raise Wan2GPError("Wan2GP media transfer tickets must contain a relative URL.")
         expected_prefix = "/wangp_api/gallery/upload/" if method == "PUT" else "/wangp_api/gallery/download/"
@@ -306,7 +315,7 @@ class Wan2GPClient:
             raise Wan2GPError("Wan2GP media transfer ticket contains an unsafe path.")
         if not parsed.path.startswith(expected_prefix) and not parsed.path.startswith(expected_prefix[1:]):
             raise Wan2GPError("Wan2GP returned a media ticket outside its gallery transfer route.")
-        url = httpx.URL(self.origin).join(raw_url)
+        url = httpx2.URL(self.origin).join(raw_url)
         if not url.path.startswith(expected_prefix) or url.path == expected_prefix:
             raise Wan2GPError("Wan2GP returned a media ticket outside its gallery transfer route.")
         if _origin_of(str(url)) != self.origin:
@@ -371,7 +380,7 @@ class Wan2GPClient:
                         spool.write(chunk)
                     spool.seek(0)
                     return spool.read()
-        except httpx.TooManyRedirects as exc:
+        except httpx2.TooManyRedirects as exc:
             raise Wan2GPError("Wan2GP media download unexpectedly redirected.") from exc
 
     # -- jobs ------------------------------------------------------------

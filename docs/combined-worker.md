@@ -51,6 +51,11 @@ Starting the container requires both:
 - a strong, random `NODETOOL_WORKER_TOKEN`, shared with the external NodeTool
   main process and used to authenticate the WebSocket connection.
 
+The external NodeTool main process attaches to the container only when
+`NODETOOL_WORKER_URL=ws://<gpu-host>:7777` is set alongside the same
+`NODETOOL_WORKER_TOKEN`. Without it, the main process starts a local Python
+worker instead.
+
 Only port 7777 is used or exposed. There is no internal WanGP HTTP service.
 
 ## Request-scoped secrets
