@@ -57,13 +57,14 @@ Without the desktop app, install it from PyPI into the environment that runs
 the NodeTool Python worker, not the Wan2GP one:
 
 ```bash
-pip install nodetool-wan2gp
+pip install "nodetool-wan2gp>=0.2.0"
 ```
 
-It requires `nodetool-core>=0.8.1` with its `audio` extra, `httpx2`, and MCP
-`>=2.3,<3`. The audio extra provides the dependencies needed for
-`ProcessingContext` asset conversion. No PyTorch, no diffusers. To work on the
-pack itself, see [Development](#development).
+Version 0.2.0 requires `nodetool-core>=0.8.1` with its `audio` extra, `httpx2`,
+and MCP `>=2.3,<3`. Version 0.1.0 still uses MCP 1.x and `httpx`. The audio
+extra provides the dependencies needed for `ProcessingContext` asset conversion.
+No PyTorch, no diffusers. To work on the pack itself, see
+[Development](#development).
 
 ## Point NodeTool at your server
 
