@@ -22,6 +22,86 @@ run against this version.
 | Model defaults | `wangp_model(model_type=..., action="defaults", arguments={})` |
 | Search models | `wangp_models(action="search", arguments={"query": ..., "limit": ...})` |
 
+| Upload a workspace file | `wangp_session(action="create_file_upload", arguments={"filename": ..., "size_bytes": ...})` |
+| Model capabilities | `wangp_model(model_type=..., action="capabilities")` |
+| Validate settings | `wangp_validate(settings={...})` |
+
+### Media settings the Generate node sends
+
+Confirmed on 1 November 2026 against WanGP v19.02 (`616e605`) with
+`wangp_validate`, run on a machine without a GPU, so no generation backed these
+rows. The settings came from the node's own `build_settings` with real uploads.
+Every case reported `valid: true` and listed the role among the inputs it read.
+
+| Node input | Setting | Mode WanGP turned on | Model checked |
+| --- | --- | --- | --- |
+| `image` | `image_start` | `image_prompt_type` `S` | `ti2v_2_2_fastwan` |
+| `image_end` | `image_end` | `image_prompt_type` `SE` with `image` | `minimax_h3_fl2va_pruned` |
+| `reference_images` | `image_refs`, a list of media ids | `video_prompt_type` `KI` | `ltx2_25_22B_msr`, two images |
+| `reference_images` with `video` | `image_refs`, `video_guide` | `video_prompt_type` `UVI` | `kiwi_edit` |
+| `video` with `video_mask` | `video_guide`, `video_mask` | none: `video_prompt_type` `VA` came from settings | `ltx2_25_22B_distilled` |
+| `source_video` | `video_source` | `image_prompt_type` `TV` | `ti2v_2_2_fastwan` |
+| `audio` | `audio_guide` | `audio_prompt_type` `A` | `ltx2_25_22B_distilled` |
+| `custom_file` | `custom_guide`, a workspace path | from the model's `custom_file` declaration | `wanmove` (`.npy`), `yue2` (`.abc`) |
+| `reference_images` | `image_refs` | `video_prompt_type` `I` | `trellis2_shape`, a 3D model |
+
+WanGP infers the start, end, continuation, reference and audio modes from the
+media it receives (`apply_media_flag_defaults` in `shared/api.py`). It does not
+infer the control and mask modes: `video_guide` without a `V` in
+`video_prompt_type` fails with `input would be ignored; requires an enabled
+Control or Reference Video mode`. The node leaves that mode to `settings`.
+
+`image_refs` takes a list. Audio goes through the gallery upload like images
+and video, and comes back as an `audio:` media id.
+
+### Custom files
+
+The gallery refuses files that are not image, video, audio, 3D or world media,
+such as Wan-Move's `.npy` trajectory or YuE's `.abc` score.
+`create_file_upload` takes any file name. The client sends `size_bytes`, then
+PUTs the raw bytes to the returned `/wangp_api/files/upload/<token>` URL. A
+complete upload finalizes itself and answers:
+
+```json
+{"status": "done", "offset": 2720, "size_bytes": 2720, "filename": "traj.npy",
+ "path": "@documents/uploads/<id>/traj.npy", "mime_type": "application/octet-stream"}
+```
+
+`custom_guide` accepts that `path` on a server started without
+`--mcp-allow-read-file-system`. It is a handle the server issued, not a path
+from the NodeTool machine. `wanmove` without `custom_guide` fails validation
+with `custom_guide is required for the selected input mode.`
+
+`wangp_model(action="capabilities")` returns the declaration under
+`metadata.media_inputs.custom_file`, for example
+`{"name": "ABC Score", "file_types": [".abc"], "required": true,
+"audio_prompt_type": "1"}` for `yue2`. Its defaults use `audio_prompt_type`
+`"0"`, which ignores the score, and `wangp_validate` still reports the request
+as valid. When `custom_file` is connected, Generate applies the declared
+`model_mode`, `video_prompt_type` or `audio_prompt_type` unless the user's
+settings set it. API v1 has no workspace uploads, so the node refuses
+`custom_file` there.
+
+### Outputs
+
+A finished job's `gallery_items[].media_type` is `image`, `video`, `audio`,
+`3d` or `world` (`_gallery_media_type` in `shared/mcp/server.py`). Generate
+returns a `Model3DRef` for `3d`, with the format taken from the item's file
+extension. NodeTool has no reference type for `world`, so Generate fails with a
+message that names it. The two transcription models
+(`nemotron_transcribe`, `nemotron_transcribe_q4`) list `text` as an output.
+Their result shape was not observed, since no model ran. When a finished job
+has no gallery item, Generate names the generated files in its error.
+
+### Model search
+
+`wangp_models(action="search")` pages with `cursor` and `next_cursor`, up to 100
+rows a page. A search with a `query` returns full rows including
+`media_inputs`. A search without one returns compact rows (`model_type`, `name`
+and sizes), so ListModels reads `wangp_model(action="capabilities")` for each.
+`filters` takes `main_output`, `inputs` and `capabilities` (a list). The live
+server listed 291 models: 173 with a video output, 16 with a 3D output.
+
 Asynchronous jobs are off by default on a headless server, so it must be started
 with `--mcp-async`. `--mcp-webui` always allows them.
 

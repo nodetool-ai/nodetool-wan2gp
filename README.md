@@ -1,7 +1,7 @@
 # nodetool-wan2gp
 
-NodeTool nodes that generate video with a [Wan2GP](https://github.com/deepbeepmeep/Wan2GP)
-server you run yourself. The nodes call Wan2GP's MCP server over HTTP, so no
+NodeTool nodes that generate video, images, audio and 3D models with a
+[Wan2GP](https://github.com/deepbeepmeep/Wan2GP) server you run yourself. The nodes call Wan2GP's MCP server over HTTP, so no
 model ever loads inside the NodeTool process.
 
 ## License boundary
@@ -186,14 +186,53 @@ Generate(
 )
 ```
 
-`Generate` returns an image, video, or audio reference according to the
-returned gallery item's `media_type`; the dedicated video nodes reject
-non-video outputs. `model_type` values are the stems of the JSON files in
-Wan2GP's `defaults/` directory, such as `t2v`, `t2v_2_2`, `i2v`, `i2v_2_2`, and
-`ti2v_2_2`. Call the
-`wangp_models` tool on your own server for the list it offers. See
-[docs/wan2gp-contract.md](docs/wan2gp-contract.md) for the MCP tool shapes this
-package depends on.
+`Generate` takes optional media inputs and uploads each one to the server's
+gallery before it submits the job:
+
+| Input | Wan2GP setting |
+| --- | --- |
+| `image` | `image_start` |
+| `image_end` | `image_end` |
+| `reference_images` (a list) | `image_refs` |
+| `video` | `video_guide` |
+| `video_mask` | `video_mask` |
+| `source_video` | `video_source` |
+| `audio` | `audio_guide` |
+| `custom_file` | `custom_guide` |
+
+Wan2GP turns on the start, end, reference, continuation and audio modes itself.
+A control video with a mask also needs `"video_prompt_type": "VA"` in
+`settings`, unless the model's defaults enable it. `custom_file` is the extra
+file some models require, such as a `.npy` trajectory for `wanmove` or an
+`.abc` score for `yue2`. It goes to the server's workspace instead of the
+gallery, which needs MCP API v2 or later. Set `custom_file_name` when the asset
+has no file name in its URI.
+
+`Generate` returns an image, video, audio or 3D model reference according to
+the returned gallery item's `media_type`. It fails with a clear message for
+interactive worlds, which NodeTool cannot store. The dedicated video nodes
+reject non-video outputs.
+
+These settings were checked with `wangp_validate` on WanGP v19.02. No
+generation has run through the new inputs yet. See
+[docs/wan2gp-contract.md](docs/wan2gp-contract.md#media-settings-the-generate-node-sends).
+
+### `wan2gp.list_models.ListModels`
+
+Lists the models the running server offers, with each one's outputs and
+`media_inputs`. Filter by `query`, `main_output`, `media_input` and
+`capability`. The list includes finetunes, so it reflects your install, not
+this package's release.
+
+```python
+ListModels(main_output="video", media_input="image")
+```
+
+`model_type` values are the stems of the JSON files in Wan2GP's `defaults/`
+and `finetunes/` directories, such as `t2v_2_2`, `i2v_2_2` and
+`ti2v_2_2_fastwan`. The node fields take them as free text, because the list
+depends on the server. See [docs/wan2gp-contract.md](docs/wan2gp-contract.md)
+for the MCP tool shapes this package depends on.
 
 ## Run the smoke script
 

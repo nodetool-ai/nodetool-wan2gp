@@ -1,0 +1,67 @@
+{
+  "metadata": {
+    "model_type": "yue2",
+    "name": "Music YuE2 3B",
+    "family": "music",
+    "family_label": "Music",
+    "base_model_type": "yue2",
+    "finetune": false,
+    "main_output": [
+      "audio"
+    ],
+    "outputs": [
+      "audio"
+    ],
+    "inputs": [
+      "text",
+      "audio",
+      "file"
+    ],
+    "capabilities": [
+      "text_to_audio",
+      "audio_to_audio",
+      "audio_output",
+      "lora"
+    ],
+    "specialities": [
+      {
+        "name": "music generation",
+        "aliases": [
+          "song generation",
+          "lyrics to song"
+        ]
+      }
+    ],
+    "media_inputs": {
+      "custom_file": {
+        "name": "ABC Score",
+        "kinds": [
+          "file"
+        ],
+        "file_types": [
+          ".abc"
+        ],
+        "required": true,
+        "audio_prompt_type": "1"
+      },
+      "audio": [
+        "prompt",
+        "output"
+      ]
+    },
+    "description": "Create stereo songs from lyrics and musical style. Choose a new composition, a supplied ABC score, or notation transcribed from source audio. Supplied and transcribed scores can be used directly or continued before rendering. Save the complete composition as ABC and MIDI. Audio conditioning creates a new rendition; it does not preserve the source recording.",
+    "accelerated": "none"
+  },
+  "input_guidance": {
+    "action": "definition",
+    "arguments": {
+      "property": "infos"
+    }
+  },
+  "prompt_guidance": {
+    "action": "definition",
+    "arguments": {
+      "property": "prompt_infos"
+    }
+  }
+}

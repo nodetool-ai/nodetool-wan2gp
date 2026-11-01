@@ -1,4 +1,4 @@
-"""The package metadata scan must find exactly the three v1 nodes.
+"""The package metadata scan must find exactly the shipped nodes.
 
 This runs the real ``nodetool-pkg scan`` in a subprocess, the same command that
 writes ``src/nodetool/package_metadata/nodetool-wan2gp.json``. A node that fails
@@ -19,11 +19,13 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 METADATA = REPO_ROOT / "src" / "nodetool" / "package_metadata" / "nodetool-wan2gp.json"
 
-EXPECTED_NODE_TYPES = [
+#: The nodes that run a generation job and share the connection fields.
+JOB_NODE_TYPES = [
     "wan2gp.generate.Generate",
     "wan2gp.image_to_video.ImageToVideo",
     "wan2gp.text_to_video.TextToVideo",
 ]
+EXPECTED_NODE_TYPES = sorted(JOB_NODE_TYPES + ["wan2gp.list_models.ListModels"])
 
 SHARED_FIELDS = ["server_url", "timeout_seconds", "max_media_bytes", "seed"]
 VIDEO_FIELDS = [
@@ -42,7 +44,28 @@ VIDEO_FIELDS = [
 EXPECTED_FIELDS = {
     "wan2gp.text_to_video.TextToVideo": SHARED_FIELDS + VIDEO_FIELDS,
     "wan2gp.image_to_video.ImageToVideo": SHARED_FIELDS + ["image"] + VIDEO_FIELDS,
-    "wan2gp.generate.Generate": SHARED_FIELDS + ["model_type", "settings", "image", "video"],
+    "wan2gp.generate.Generate": SHARED_FIELDS
+    + [
+        "model_type",
+        "settings",
+        "image",
+        "image_end",
+        "reference_images",
+        "video",
+        "video_mask",
+        "source_video",
+        "audio",
+        "custom_file",
+        "custom_file_name",
+    ],
+    "wan2gp.list_models.ListModels": [
+        "server_url",
+        "query",
+        "main_output",
+        "media_input",
+        "capability",
+        "limit",
+    ],
 }
 
 EXPECTED_BASIC_FIELDS = {
@@ -56,6 +79,7 @@ EXPECTED_BASIC_FIELDS = {
         "num_frames",
     ],
     "wan2gp.generate.Generate": ["model_type", "settings"],
+    "wan2gp.list_models.ListModels": ["query", "main_output", "media_input"],
 }
 
 
@@ -78,7 +102,7 @@ def _node(scanned: dict, node_type: str) -> dict:
     return matches[0]
 
 
-def test_the_scan_finds_exactly_the_three_v1_nodes(scanned):
+def test_the_scan_finds_exactly_the_shipped_nodes(scanned):
     assert sorted(node["node_type"] for node in scanned["nodes"]) == EXPECTED_NODE_TYPES
 
 
@@ -118,7 +142,7 @@ def test_server_url_metadata_is_runtime_safe(scanned, node_type):
     assert server_url["default"] is None
 
 
-@pytest.mark.parametrize("node_type", EXPECTED_NODE_TYPES)
+@pytest.mark.parametrize("node_type", JOB_NODE_TYPES)
 def test_media_limit_metadata_is_safe_and_bounded(scanned, node_type):
     node = _node(scanned, node_type)
     media_limit = next(
@@ -136,8 +160,15 @@ def test_each_node_declares_its_output_type(scanned, node_type):
     if node_type == "wan2gp.generate.Generate":
         assert output_type == {
             "type": "union",
-            "type_args": [{"type": "image"}, {"type": "video"}, {"type": "audio"}],
+            "type_args": [
+                {"type": "image"},
+                {"type": "video"},
+                {"type": "audio"},
+                {"type": "model_3d"},
+            ],
         }
+    elif node_type == "wan2gp.list_models.ListModels":
+        assert output_type["type"] == "list"
     else:
         assert output_type == {"type": "video"}
 
