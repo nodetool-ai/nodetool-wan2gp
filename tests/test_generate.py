@@ -90,10 +90,10 @@ async def test_process_merges_user_settings_over_the_model_defaults(
         }
     )
     assert fake_server.args_for("wangp_generate") == [
-        {"source": expected, "wait": False}
+        {"settings": expected, "wait": False}
     ]
     assert fake_server.args_for("wangp_model") == [
-        {"model_type": "t2v_2_2", "view": "defaults"}
+        {"model_type": "t2v_2_2", "action": "defaults", "arguments": {}}
     ]
 
 
@@ -103,7 +103,7 @@ async def test_process_strips_the_api_key(
     node = a_node(server_url, settings={"_api": {"return_media": True}, "prompt": "x"})
     await node.process(context)
 
-    source = fake_server.args_for("wangp_generate")[0]["source"]
+    source = fake_server.args_for("wangp_generate")[0]["settings"]
     assert "_api" not in source
     assert source["prompt"] == "x"
 
@@ -118,9 +118,9 @@ async def test_process_uploads_an_optional_image_as_image_start(
     )
     await node.process(context)
 
-    source = fake_server.args_for("wangp_generate")[0]["source"]
+    source = fake_server.args_for("wangp_generate")[0]["settings"]
     assert source["image_start"] == "visual:0a1b2c3d4e5f"
-    assert fake_server.args_for("wangp_create_gallery_upload") == [
+    assert fake_server.session_args("create_gallery_upload") == [
         {"filename": "image.png"}
     ]
 
@@ -131,9 +131,9 @@ async def test_process_uploads_an_optional_video_as_video_guide(
     node = a_node(server_url, video=VideoRef(data=fixture_bytes("tiny.mp4")))
     await node.process(context)
 
-    source = fake_server.args_for("wangp_generate")[0]["source"]
+    source = fake_server.args_for("wangp_generate")[0]["settings"]
     assert source["video_guide"] == "visual:0a1b2c3d4e5f"
-    assert fake_server.args_for("wangp_create_gallery_upload") == [
+    assert fake_server.session_args("create_gallery_upload") == [
         {"filename": "video.mp4"}
     ]
 
@@ -143,8 +143,8 @@ async def test_process_uploads_nothing_when_no_media_is_connected(
 ):
     await a_node(server_url).process(context)
 
-    assert fake_server.args_for("wangp_create_gallery_upload") == []
-    source = fake_server.args_for("wangp_generate")[0]["source"]
+    assert fake_server.session_args("create_gallery_upload") == []
+    source = fake_server.args_for("wangp_generate")[0]["settings"]
     assert "image_start" not in source
     assert "video_guide" not in source
 

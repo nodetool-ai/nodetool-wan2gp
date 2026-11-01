@@ -22,8 +22,17 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 PROTOCOL_VERSION = "2025-06-18"
 
-# The tools the fake exposes, with the argument names Wan2GP declares.
+# The tools the fake exposes. API v2 and later keep jobs and transfers behind
+# wangp_session. API v1, and the commit Dockerfile.combined pins, name each one.
 TOOL_NAMES = [
+    "wangp_models",
+    "wangp_model",
+    "wangp_generate",
+    "wangp_validate",
+    "wangp_list_gallery",
+    "wangp_session",
+]
+LEGACY_TOOL_NAMES = [
     "wangp_models",
     "wangp_model",
     "wangp_list_loras",
@@ -34,6 +43,9 @@ TOOL_NAMES = [
     "wangp_create_gallery_upload",
     "wangp_create_gallery_download",
 ]
+
+
+SESSION_ACTIONS = {"get_job", "cancel_job", "create_gallery_upload", "create_gallery_download"}
 
 
 class _DefaultContentLength:
@@ -55,13 +67,14 @@ def fixture_bytes(name: str) -> bytes:
 class FakeWan2GP:
     """An ASGI app that behaves enough like Wan2GP's MCP server."""
 
-    def __init__(self) -> None:
+    def __init__(self, legacy: bool = False) -> None:
+        self.legacy = legacy
         self.requests: list[dict[str, Any]] = []
         self.tool_calls: list[dict[str, Any]] = []
         self.uploads: dict[str, bytes] = {}
         self.upload_filenames: dict[str, str] = {}
         self.cancelled_jobs: list[str] = []
-        # Snapshots wangp_get_job returns, in order. The last one repeats.
+        # Snapshots get_job returns, in order. The last one repeats.
         self.job_snapshots: list[dict[str, Any]] = [fixture("job_done")]
         self.download_payload: bytes = fixture_bytes("tiny.mp4")
         # None omits the header; an integer can model an understated length.
@@ -76,33 +89,43 @@ class FakeWan2GP:
         if name == "wangp_models":
             return fixture("models")
         if name == "wangp_model":
-            if args.get("view") == "defaults":
+            view = args.get("view") if self.legacy else args.get("action")
+            if view == "defaults":
                 return fixture(f"model_defaults_{args['model_type']}")
-            return {"model_type": args["model_type"], "view": args.get("view", "schema")}
+            return {"model_type": args["model_type"], "view": view or "schema"}
         if name == "wangp_generate":
+            if ("source" if self.legacy else "settings") not in args:
+                raise ValueError("Unknown argument for wangp_generate")
             return fixture("job_submitted")
-        if name == "wangp_get_job":
+        if name == "wangp_list_gallery":
+            return []
+        if name == "wangp_list_loras":
+            return {"loras": []}
+        if name == "wangp_session" and not self.legacy:
+            return self.session_result(args["action"], args.get("arguments") or {})
+        if self.legacy and name.removeprefix("wangp_") in SESSION_ACTIONS:
+            return self.session_result(name.removeprefix("wangp_"), args)
+        raise KeyError(name)
+
+    def session_result(self, action: str, args: dict[str, Any]) -> Any:
+        if action == "get_job":
             index = min(self._get_job_index, len(self.job_snapshots) - 1)
             self._get_job_index += 1
             return self.job_snapshots[index]
-        if name == "wangp_cancel_job":
+        if action == "cancel_job":
             self.cancelled_jobs.append(args["job_id"])
             return fixture("job_cancelled")
-        if name == "wangp_list_gallery":
-            return []
-        if name == "wangp_create_gallery_upload":
+        if action == "create_gallery_upload":
             ticket = dict(fixture("gallery_upload_ticket"))
             ticket["filename"] = args["filename"]
             token = ticket["upload_url"].rsplit("/", 1)[-1]
             self.upload_filenames[token] = args["filename"]
             return ticket
-        if name == "wangp_create_gallery_download":
+        if action == "create_gallery_download":
             ticket = dict(fixture("gallery_download_ticket"))
             ticket["media_id"] = args["media_id"]
             return ticket
-        if name == "wangp_list_loras":
-            return {"loras": []}
-        raise KeyError(name)
+        raise KeyError(action)
 
     # -- MCP JSON-RPC ----------------------------------------------------
 
@@ -129,7 +152,7 @@ class FakeWan2GP:
                             "description": f"Fake {name}",
                             "inputSchema": {"type": "object", "properties": {}},
                         }
-                        for name in TOOL_NAMES
+                        for name in (LEGACY_TOOL_NAMES if self.legacy else TOOL_NAMES)
                     ]
                 },
             )
@@ -148,11 +171,11 @@ class FakeWan2GP:
                 )
             try:
                 value = self.tool_result(name, args)
-            except KeyError:
+            except (KeyError, ValueError) as error:
                 return self._ok(
                     message,
                     {
-                        "content": [{"type": "text", "text": f"Unknown tool: {name}"}],
+                        "content": [{"type": "text", "text": f"Unknown tool: {name} ({error})"}],
                         "isError": True,
                     },
                 )
@@ -229,6 +252,23 @@ class FakeWan2GP:
 
     def args_for(self, name: str) -> list[dict[str, Any]]:
         return [call["arguments"] for call in self.tool_calls if call["name"] == name]
+
+    def session_args(self, action: str) -> list[dict[str, Any]]:
+        """Arguments of one job or transfer action, on either API version."""
+        if self.legacy:
+            return self.args_for(f"wangp_{action}")
+        return [
+            call["arguments"].get("arguments") or {}
+            for call in self.tool_calls
+            if call["name"] == "wangp_session" and call["arguments"].get("action") == action
+        ]
+
+    def session_actions_called(self) -> set[str]:
+        return {
+            call["arguments"].get("action")
+            for call in self.tool_calls
+            if call["name"] == "wangp_session"
+        }
 
 
 async def _read_body(receive: Any) -> bytes:

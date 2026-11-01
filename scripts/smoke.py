@@ -9,7 +9,7 @@ Start Wan2GP first, in its own conda environment, with the MCP server on:
 
     conda activate wan2gp
     cd /path/to/Wan2GP
-    python wgp.py --mcp --mcp-transport streamable-http \\
+    python wgp.py --mcp --mcp-async --mcp-transport streamable-http \\
         --mcp-host 127.0.0.1 --mcp-port 7866
 
 Then, in the nodetool environment:
@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Start Wan2GP first:\n"
-            "  python wgp.py --mcp --mcp-transport streamable-http "
+            "  python wgp.py --mcp --mcp-async --mcp-transport streamable-http "
             "--mcp-host 127.0.0.1 --mcp-port 7866"
         ),
     )
@@ -151,7 +151,7 @@ def report_failure(error: BaseException, server_url: str) -> None:
         print(
             f"\nFAILED: cannot reach a Wan2GP MCP server at {server_url}.\n"
             "Start Wan2GP with:\n"
-            "  python wgp.py --mcp --mcp-transport streamable-http "
+            "  python wgp.py --mcp --mcp-async --mcp-transport streamable-http "
             "--mcp-host 127.0.0.1 --mcp-port 7866\n"
             "or point this script at another server with --server-url.",
             file=sys.stderr,

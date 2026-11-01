@@ -1,10 +1,45 @@
 # The Wan2GP MCP contract this package depends on
 
+The client supports two API generations and picks one when it connects, from the
+tool list. A server that offers `wangp_session` speaks API v2 or later. Any other
+speaks API v1.
+
+## API v2.1, the current default
+
+Confirmed against a live server: WanGP v19.02, commit `616e605`, on 1 November
+2026. TextToVideo, ImageToVideo and Generate completed generations through this
+package with `ti2v_2_2_fastwan`, and model search, model defaults and job
+cancellation were exercised. Other models and the client's API v1 path were not
+run against this version.
+
+| Operation | Call |
+| --- | --- |
+| Generate | `wangp_generate(settings={...}, wait=false)` |
+| Read a job | `wangp_session(action="get_job", arguments={"job_id": ...})` |
+| Cancel a job | `wangp_session(action="cancel_job", arguments={"job_id": ...})` |
+| Upload media | `wangp_session(action="create_gallery_upload", arguments={"filename": ...})` |
+| Download media | `wangp_session(action="create_gallery_download", arguments={"media_id": ...})` |
+| Model defaults | `wangp_model(model_type=..., action="defaults", arguments={})` |
+| Search models | `wangp_models(action="search", arguments={"query": ..., "limit": ...})` |
+
+Asynchronous jobs are off by default on a headless server, so it must be started
+with `--mcp-async`. `--mcp-webui` always allows them.
+
+A running job snapshot carries its latest `progress` at the top level, with no
+`events` by default. A finished one keeps `done` and `result` and adds `status`
+(`done`, `error` or `interrupted`). Upload tickets stay under
+`/wangp_api/gallery/upload/`. Download tickets moved to
+`/wangp_api/files/download/`, and the client accepts both routes.
+
+## API v1
+
+Used by servers before API v2, and by `--mcp-api-version 1`. The combined image's
+pinned commit below speaks this API.
+
 Every item below was resolved by reading the Wan2GP source at commit
-`362c3467a70e1136ceb52eec95907205a8f88543`. **None of it was
-confirmed against a live server.** There was no Wan2GP instance and no GPU on
-the machine where this package was written. Treat each shape as source-derived
-until someone runs `scripts/smoke.py` against a real server.
+`362c3467a70e1136ceb52eec95907205a8f88543`. On 1 November 2026 this package also
+completed generations against that commit, with both video nodes, using
+`ti2v_2_2_fastwan`. The remaining shapes are source-derived.
 
 Line references point into the Wan2GP checkout, not into this repository. This
 package never imports Wan2GP; it only speaks to it over HTTP.

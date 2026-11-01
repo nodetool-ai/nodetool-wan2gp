@@ -53,7 +53,7 @@ async def test_get_model_defaults_uses_the_defaults_view(
 
     assert defaults["image_prompt_type"] == "S"
     assert fake_server.args_for("wangp_model") == [
-        {"model_type": "i2v_2_2", "view": "defaults"}
+        {"model_type": "i2v_2_2", "action": "defaults", "arguments": {}}
     ]
 
 
@@ -66,7 +66,7 @@ async def test_upload_round_trip_returns_a_media_id(
 
     assert media_id == "visual:0a1b2c3d4e5f"
     assert list(fake_server.uploads.values()) == [payload]
-    assert fake_server.args_for("wangp_create_gallery_upload") == [{"filename": "start.png"}]
+    assert fake_server.session_args("create_gallery_upload") == [{"filename": "start.png"}]
     put_requests = [r for r in fake_server.requests if r["method"] == "PUT"]
     assert len(put_requests) == 1
     assert put_requests[0]["path"].startswith("/wangp_api/gallery/upload/")
@@ -103,7 +103,7 @@ async def test_upload_enforces_ticket_size(
 
         async def ticket(name, args=None):
             value = await original(name, args)
-            if name == "wangp_create_gallery_upload":
+            if (args or {}).get("action") == "create_gallery_upload":
                 value["max_bytes"] = 1
             return value
 
@@ -124,7 +124,7 @@ async def test_download_enforces_streamed_size(
 
         async def ticket(name, args=None):
             value = await original(name, args)
-            if name == "wangp_create_gallery_download":
+            if (args or {}).get("action") == "create_gallery_download":
                 value["size"] = 1
             return value
 
@@ -141,7 +141,7 @@ async def test_download_round_trip_returns_the_bytes(
 
     assert data == fixture_bytes("tiny.mp4")
     assert data[4:8] == b"ftyp"
-    assert fake_server.args_for("wangp_create_gallery_download") == [
+    assert fake_server.session_args("create_gallery_download") == [
         {"media_id": "visual:9f8e7d6c5b4a"}
     ]
 
@@ -155,7 +155,7 @@ async def test_download_spools_large_payload_before_returning_bytes(
 
         async def ticket(name, args=None):
             value = await original(name, args)
-            if name == "wangp_create_gallery_download":
+            if (args or {}).get("action") == "create_gallery_download":
                 value.pop("size", None)
             return value
 
@@ -184,7 +184,7 @@ async def test_submit_returns_the_job_id(server_url, client_factory, fake_server
         job_id = await client.submit(settings)
 
     assert job_id == "3d9a1c0e5b7f4a2d8c6e0f1a2b3c4d5e"
-    assert fake_server.args_for("wangp_generate") == [{"source": settings, "wait": False}]
+    assert fake_server.args_for("wangp_generate") == [{"settings": settings, "wait": False}]
 
 
 async def test_poll_until_done_forwards_progress(
@@ -209,7 +209,7 @@ async def test_poll_until_done_forwards_progress(
     assert job["result"]["success"] is True
     assert [entry["progress"] for entry in seen] == [40, 100]
     assert [entry["current_step"] for entry in seen] == [12, 30]
-    assert len(fake_server.args_for("wangp_get_job")) == 3
+    assert len(fake_server.session_args("get_job")) == 3
 
 
 async def test_poll_until_done_times_out(server_url, client_factory, fake_server: FakeWan2GP):
@@ -320,9 +320,92 @@ async def test_every_tool_the_client_uses_is_exercised(
     assert fake_server.tool_names_called() == {
         "wangp_models",
         "wangp_model",
+        "wangp_generate",
+        "wangp_session",
+    }
+    assert fake_server.session_actions_called() == {
+        "create_gallery_upload",
+        "get_job",
+        "create_gallery_download",
+        "cancel_job",
+    }
+
+
+async def test_a_running_snapshot_reports_top_level_progress(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    """API v2.1 carries the latest progress beside the job, with no events."""
+    fake_server.job_snapshots = [
+        {
+            "job_id": "job",
+            "done": False,
+            "progress": {"phase": "denoising", "current_step": 2, "total_steps": 3},
+        },
+        {"job_id": "job", "done": True, "status": "done", "result": {"success": True}},
+    ]
+    seen = []
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        job = await client.poll_until_done("job", on_progress=seen.append, sleep=no_sleep)
+    assert job["status"] == "done"
+    assert seen == [{"phase": "denoising", "current_step": 2, "total_steps": 3}]
+
+
+async def test_an_older_server_gets_its_own_tools_and_arguments(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    """A server from before API v2, such as the combined image's pinned commit."""
+    fake_server.legacy = True
+    fake_server.job_snapshots = [fixture("job_done")]
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    settings = {"model_type": "t2v_2_2", "prompt": "hi"}
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        await client.list_models(query="wan")
+        await client.get_model_defaults("t2v_2_2")
+        await client.upload_bytes("start.png", fixture_bytes("tiny.png"))
+        job_id = await client.submit(settings)
+        await client.poll_until_done(job_id, sleep=no_sleep)
+        await client.download_media("visual:9f8e7d6c5b4a")
+        await client.cancel(job_id)
+    assert fake_server.tool_names_called() == {
+        "wangp_models",
+        "wangp_model",
         "wangp_create_gallery_upload",
         "wangp_generate",
         "wangp_get_job",
         "wangp_create_gallery_download",
         "wangp_cancel_job",
     }
+    assert fake_server.args_for("wangp_generate") == [{"source": settings, "wait": False}]
+    assert fake_server.args_for("wangp_model") == [{"model_type": "t2v_2_2", "view": "defaults"}]
+
+
+async def test_a_server_without_async_jobs_names_the_flag_to_set(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    fake_server.tool_errors["wangp_generate"] = (
+        "wait=false is unavailable: asynchronous execution is disabled. Nothing was submitted."
+    )
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        with pytest.raises(Wan2GPError, match="--mcp-async"):
+            await client.submit({"model_type": "t2v_2_2", "prompt": "hi"})
+
+
+async def test_download_tickets_on_the_v2_1_files_route_are_accepted(
+    server_url, client_factory, fake_server: FakeWan2GP
+):
+    async with Wan2GPClient(server_url, httpx_client_factory=client_factory) as client:
+        url, _limit = client._transfer_url(
+            {"download_url": "/wangp_api/files/download/token"}, "download_url", "GET"
+        )
+        assert url.path == "/wangp_api/files/download/token"
+        for bad in ("/wangp_api/files/upload/token", "/wangp_api/files/download/", "/other/token"):
+            with pytest.raises(Wan2GPError, match="outside its gallery"):
+                client._transfer_url({"download_url": bad}, "download_url", "GET")
+
