@@ -31,12 +31,12 @@ async def test_process_uploads_the_image_before_it_generates(
 ):
     await a_node(server_url).process(context)
 
-    assert fake_server.args_for("wangp_create_gallery_upload") == [
+    assert fake_server.session_args("create_gallery_upload") == [
         {"filename": "image.png"}
     ]
     assert list(fake_server.uploads.values()) == [fixture_bytes("tiny.png")]
     called = [call["name"] for call in fake_server.tool_calls]
-    assert called.index("wangp_create_gallery_upload") < called.index("wangp_generate")
+    assert called.index("wangp_session") < called.index("wangp_generate")
 
 
 async def test_process_sends_the_expected_settings(
@@ -59,7 +59,7 @@ async def test_process_sends_the_expected_settings(
 
     assert fake_server.args_for("wangp_generate") == [
         {
-            "source": {
+            "settings": {
                 "model_type": "i2v_2_2",
                 "prompt": "the camera pushes in",
                 "negative_prompt": "blurry",
@@ -83,7 +83,7 @@ async def test_process_never_sends_a_filesystem_path(
 ):
     await a_node(server_url).process(context)
 
-    image_start = fake_server.args_for("wangp_generate")[0]["source"]["image_start"]
+    image_start = fake_server.args_for("wangp_generate")[0]["settings"]["image_start"]
     assert image_start.startswith("visual:")
 
 
@@ -103,7 +103,7 @@ async def test_process_picks_the_extension_from_the_image_bytes(
     jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 32
     await a_node(server_url, image=ImageRef(data=jpeg)).process(context)
 
-    assert fake_server.args_for("wangp_create_gallery_upload") == [
+    assert fake_server.session_args("create_gallery_upload") == [
         {"filename": "image.jpg"}
     ]
 

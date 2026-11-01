@@ -80,7 +80,7 @@ def _origin_of(server_url: str) -> str:
 def _ticket_limit(ticket: dict[str, Any], hard_limit: int) -> int:
     """Return the effective byte limit advertised by a transfer ticket."""
     limit = hard_limit
-    for key in ("max_bytes", "size"):
+    for key in ("max_bytes", "size", "size_bytes"):
         if key in ticket and ticket[key] is not None:
             try:
                 advertised = int(ticket[key])
@@ -147,7 +147,12 @@ def parse_tool_result(result: CallToolResult, tool_name: str) -> Any:
 
 
 def progress_from_job(job: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the most recent progress event payload in a job snapshot."""
+    """Return a job snapshot's latest progress.
+
+    API v2.1 carries it beside the job. Earlier servers carry only events.
+    """
+    if isinstance(job.get("progress"), dict):
+        return job["progress"]
     for event in reversed(job.get("events") or []):
         if event.get("kind") == "progress" and isinstance(event.get("data"), dict):
             return event["data"]
@@ -196,6 +201,7 @@ class Wan2GPClient:
         self._stack: AsyncExitStack | None = None
         self._session: ClientSession | None = None
         self._media_client: httpx2.AsyncClient | None = None
+        self._legacy_api = False
 
     # -- connection ------------------------------------------------------
 
@@ -220,6 +226,10 @@ class Wan2GPClient:
             )
             session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
+            # API v2 moved jobs and transfers behind wangp_session. Servers from
+            # before it, such as the commit Dockerfile.combined pins, name each one.
+            listing = await session.list_tools()
+            self._legacy_api = not any(tool.name == "wangp_session" for tool in listing.tools)
             self._media_client = await stack.enter_async_context(
                 self._httpx_client_factory(timeout=httpx2.Timeout(REQUEST_TIMEOUT_SECONDS))
             )
@@ -275,24 +285,33 @@ class Wan2GPClient:
         listing = await self.session.list_tools()
         return [tool.name for tool in listing.tools]
 
+    async def _session_action(self, action: str, args: dict[str, Any]) -> Any:
+        """Call one job or transfer action on whichever API the server speaks."""
+        if self._legacy_api:
+            return await self.call_tool(f"wangp_{action}", args)
+        return await self.call_tool("wangp_session", {"action": action, "arguments": args})
+
     async def list_models(
         self,
         query: str = "",
         filters: dict[str, Any] | None = None,
         limit: int = 10,
-        offset: int = 0,
     ) -> dict[str, Any]:
         """Search Wan2GP's model registry. See ``wangp_models``."""
-        args: dict[str, Any] = {"query": query, "limit": limit, "offset": offset}
+        args: dict[str, Any] = {"query": query, "limit": limit}
         if filters:
             args["filters"] = filters
-        return await self.call_tool("wangp_models", args)
+        if self._legacy_api:
+            return await self.call_tool("wangp_models", args)
+        return await self.call_tool("wangp_models", {"action": "search", "arguments": args})
 
     async def get_model_defaults(self, model_type: str) -> dict[str, Any]:
         """Return one model's pristine generation defaults."""
-        return await self.call_tool(
-            "wangp_model", {"model_type": model_type, "view": "defaults"}
-        )
+        if self._legacy_api:
+            args: dict[str, Any] = {"model_type": model_type, "view": "defaults"}
+        else:
+            args = {"model_type": model_type, "action": "defaults", "arguments": {}}
+        return await self.call_tool("wangp_model", args)
 
     # -- media -----------------------------------------------------------
 
@@ -310,13 +329,15 @@ class Wan2GPClient:
         parsed = httpx2.URL(raw_url)
         if parsed.scheme or parsed.host:
             raise Wan2GPError("Wan2GP media transfer tickets must contain a relative URL.")
-        expected_prefix = "/wangp_api/gallery/upload/" if method == "PUT" else "/wangp_api/gallery/download/"
+        # API v2.1 serves downloads from /files/ and uploads from either route.
+        direction = "upload" if method == "PUT" else "download"
+        prefixes = (f"/wangp_api/gallery/{direction}/", f"/wangp_api/files/{direction}/")
         if "\\" in raw_url or any(part == ".." for part in parsed.path.split("/")):
             raise Wan2GPError("Wan2GP media transfer ticket contains an unsafe path.")
-        if not parsed.path.startswith(expected_prefix) and not parsed.path.startswith(expected_prefix[1:]):
+        if not parsed.path.lstrip("/").startswith(tuple(prefix[1:] for prefix in prefixes)):
             raise Wan2GPError("Wan2GP returned a media ticket outside its gallery transfer route.")
         url = httpx2.URL(self.origin).join(raw_url)
-        if not url.path.startswith(expected_prefix) or url.path == expected_prefix:
+        if not url.path.startswith(prefixes) or url.path in prefixes:
             raise Wan2GPError("Wan2GP returned a media ticket outside its gallery transfer route.")
         if _origin_of(str(url)) != self.origin:
             raise Wan2GPError("Wan2GP media transfer ticket points to a different origin.")
@@ -331,7 +352,7 @@ class Wan2GPClient:
         sends one.
         """
         media_type_for(filename)  # reject unsupported extensions before the round trip
-        ticket = await self.call_tool("wangp_create_gallery_upload", {"filename": filename})
+        ticket = await self._session_action("create_gallery_upload", {"filename": filename})
         url, limit = self._transfer_url(ticket, "upload_url", "PUT")
         if len(data) > limit:
             raise Wan2GPError(f"Upload of {filename} exceeds the {limit} byte transfer limit.")
@@ -353,7 +374,7 @@ class Wan2GPClient:
 
     async def download_media(self, media_id: str) -> bytes:
         """Download one gallery item by ``media_id`` and return its bytes."""
-        ticket = await self.call_tool("wangp_create_gallery_download", {"media_id": media_id})
+        ticket = await self._session_action("create_gallery_download", {"media_id": media_id})
         url, limit = self._transfer_url(ticket, "download_url", "GET")
         try:
             async with self.media_client.stream("GET", url) as response:
@@ -387,7 +408,16 @@ class Wan2GPClient:
 
     async def submit(self, settings: dict[str, Any]) -> str:
         """Start a generation from a settings dict and return its ``job_id``."""
-        job = await self.call_tool("wangp_generate", {"source": settings, "wait": False})
+        key = "source" if self._legacy_api else "settings"
+        try:
+            job = await self.call_tool("wangp_generate", {key: settings, "wait": False})
+        except Wan2GPError as error:
+            if "asynchronous execution is disabled" in str(error):
+                raise Wan2GPError(
+                    "This Wan2GP server has asynchronous jobs turned off. "
+                    "Restart it with --mcp-async, or use --mcp-webui."
+                ) from error
+            raise
         job_id = str(job.get("job_id") or "").strip()
         if not job_id:
             raise Wan2GPError("Wan2GP accepted the generation but returned no job_id.")
@@ -398,11 +428,11 @@ class Wan2GPClient:
         args: dict[str, Any] = {"job_id": job_id}
         if event_limit is not None:
             args["event_limit"] = event_limit
-        return await self.call_tool("wangp_get_job", args)
+        return await self._session_action("get_job", args)
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
         """Ask Wan2GP to cancel a job. Cancellation is cooperative."""
-        return await self.call_tool("wangp_cancel_job", {"job_id": job_id})
+        return await self._session_action("cancel_job", {"job_id": job_id})
 
     async def poll_until_done(
         self,

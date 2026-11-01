@@ -41,8 +41,12 @@ pip install -r requirements.txt
 Start Wan2GP with its MCP server on streamable HTTP, from `docs/API.md`:
 
 ```bash
-python wgp.py --mcp --mcp-transport streamable-http --mcp-host 127.0.0.1 --mcp-port 7866
+python wgp.py --mcp --mcp-async --mcp-transport streamable-http --mcp-host 127.0.0.1 --mcp-port 7866
 ```
+
+`--mcp-async` is required on Wan2GP's current MCP API: the nodes submit a job and
+poll it, and the server refuses that without the flag. The nodes detect the API
+version when they connect, so servers from before API v2 keep working without it.
 
 MCP clients connect to `http://<host>:<port>/mcp`. Use `--mcp-host 0.0.0.0` only
 on a trusted network or behind an authenticated reverse proxy.

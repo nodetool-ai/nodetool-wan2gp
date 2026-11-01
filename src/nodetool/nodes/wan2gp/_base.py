@@ -28,7 +28,7 @@ from ._client import (
     job_error_message,
 )
 
-#: How long to wait between two ``wangp_get_job`` polls.
+#: How long to wait between two ``get_job`` polls.
 POLL_INTERVAL_SECONDS = 1.0
 
 #: Empty metadata-safe sentinel; the environment is resolved at execution time.

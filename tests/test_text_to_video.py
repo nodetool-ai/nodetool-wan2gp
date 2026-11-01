@@ -58,7 +58,7 @@ async def test_process_sends_the_expected_settings(
 
     assert fake_server.args_for("wangp_generate") == [
         {
-            "source": {
+            "settings": {
                 "model_type": "t2v_2_2",
                 "prompt": "a kite over a lake",
                 "negative_prompt": "blurry",
@@ -132,7 +132,7 @@ async def test_process_downloads_the_first_gallery_item(
 
     await a_node(server_url).process(context)
 
-    assert fake_server.args_for("wangp_create_gallery_download") == [
+    assert fake_server.session_args("create_gallery_download") == [
         {"media_id": "visual:9f8e7d6c5b4a"}
     ]
 

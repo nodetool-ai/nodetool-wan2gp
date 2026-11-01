@@ -1,5 +1,5 @@
 {
-  "source": {
+  "settings": {
     "model_type": "t2v_2_2",
     "prompt": "A large orange octopus is seen resting on the bottom of the ocean floor.",
     "resolution": "832x480",
