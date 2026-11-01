@@ -486,3 +486,60 @@ are sent as `video_guide` and `video_guide2`, selecting the advertised `V-U` or
 Unsupported media kinds, counts, missing models, and missing task
 support fail before `run_task`. Audio is enabled only when a reference video
 is present and WanGP advertises a `K` audio source choice.
+
+### Moving the combined pin to v19.02
+
+`Dockerfile.combined` still pins `362c3467`. Nothing here built the image. On 1
+November 2026 the adapter in `combined/` ran against a WanGP v19.02 checkout
+(`616e605`) in its own interpreter, on a machine without a GPU, with CUDA
+queries stubbed outside the WanGP tree. No model loaded and `run_task` was not
+called.
+
+What still works:
+
+- `shared.api.init`, `list_model_metadata`, `get_model_metadata`, `run_task`,
+  `GenerationResult` and `GeneratedArtifact` keep the names and fields the
+  adapter uses. `prepare_model.py`'s calls into `wgp` (`get_model_def`,
+  `get_model_filename`, `get_model_recursive_prop`, `download_models` and the
+  quantization globals) keep compatible signatures.
+- The `models` operation returned 172 video models (170 text to video, 101
+  image to video, 69 reference to video), 139 image, 17 speech and 17 music
+  models. `ltx2_25_22B_alpha_gen` is the one video model it leaves out.
+- `_settings` built 612 requests, one for each model and operation, without an
+  error. 493 of them passed `wangp_validate` once their file paths were swapped
+  for gallery ids.
+
+What breaks or degrades:
+
+1. 66 requests fail because the model needs `image_refs`: text to video or
+   text to image on reference-only models such as `phantom_14B`, `standin`,
+   `lynx`, `kiwi_edit`, `ltx2_25_22B_msr` and the Flux Kontext and Qwen edit
+   models. WanGP's `text_to_video` capability does not say that a reference is
+   required, so the adapter offers tasks those models cannot run.
+2. Models with locked resolutions (`evoke_turbo`, `flux_dev_umo`,
+   `k5_lite_t2v_10s_distil_sparse`, `k5_pro_t2v_10s_sft_sparse`) reject the
+   adapter's tier conversion, such as `480p` to `853x480`. The adapter ignores
+   `allowed_resolutions`.
+3. `wanmove` fails without `custom_guide`, which the provider protocol has no
+   field for. `yue2` ignores its score in the default mode.
+4. Text to speech sends `audio_guide` whenever a reference voice is attached.
+   `qwen3_tts_customvoice` and `qwen3_tts_voicedesign` take none, and MCP
+   validation rejects it. `run_task` may ignore it instead. That was not run.
+5. v19.02 vendors mmgp 4.5.0 in its `mmgp/` folder instead of installing
+   `mmgp==3.7.14` from PyPI. The image's separate `MMGP_COMMIT` checkout, which
+   supplies the mmgp licence and attribution, would no longer describe the
+   mmgp code that runs. The attribution must point at the vendored copy.
+6. The requirements add `comfy-kitchen==0.2.35` and `optimum-quanto==0.2.7`,
+   which mmgp needed from PyPI before. Both commits ask for the CUDA 13 nightly
+   `onnxruntime-gpu` while the image installs CUDA 12.8 PyTorch. Whether the
+   new set installs in the image is untested.
+7. The adapter uses none of the inputs added since the pin: reference videos
+   (`media_inputs.video.reference`, 12 video models), end images, audio-driven
+   video and 3D outputs.
+
+These are not adapter faults: 16 requests to `animate`, `scail`, `mocha`,
+`steadydancer` and four other models fail inside WanGP with
+`could not convert string to float: 'control'`, which a bare
+`{"model_type": "scail", "prompt": "x"}` reproduces. The remaining failures
+came from the probe request itself: 17 frames is too short for a 3-second voice
+clip and for Ovi's sliding window.
