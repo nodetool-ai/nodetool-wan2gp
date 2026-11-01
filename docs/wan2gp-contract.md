@@ -487,6 +487,45 @@ Unsupported media kinds, counts, missing models, and missing task
 support fail before `run_task`. Audio is enabled only when a reference video
 is present and WanGP advertises a `K` audio source choice.
 
+### The MCP provider adapter
+
+`_provider.py` speaks the NodeTool worker's provider adapter protocol, the
+same one `combined/provider_adapter.py` speaks, but answers every request over
+MCP. It reads one JSON request line and writes `progress` events and one
+`result` as JSON lines. Library logs go to stderr, because the module keeps a
+private copy of stdout for events.
+
+| Operation | What it sends |
+| --- | --- |
+| `models` | `wangp_models` search with `filters.main_output` of `video` or `image`, then each model's capabilities |
+| `text_to_video` | `model_type`, `prompt` and the mapped settings below |
+| `image_to_video` | the staged image as `image_start` |
+| `reference_to_video` | the staged images, in order, as `image_refs`. Reference videos are refused |
+| `text_to_image` | `image_mode: 1`, which selects the image output of models that also make video |
+| `image_to_image` | the image as `image_start` or `image_refs`, from the model's `media_inputs.image` roles |
+
+A video model offers `text_to_video`, `image_to_video` and
+`reference_to_video` when its capabilities list `text_to_video`,
+`image_to_video` and `reference_images`. An image model offers
+`text_to_image` and `image_to_image` the same way. Parameters are read in
+snake_case or camelCase: `negativePrompt`, `numInferenceSteps`, `seed`,
+`guidanceScale`, `strength` (as `denoising_strength`), `numFrames` (as
+`video_length`), `durationSeconds` (as `"<n>s"`), and `resolution` with
+`aspectRatio`, where a tier such as `720p` sets the short side. `width` and
+`height`, or `targetWidth` and `targetHeight`, give a size instead.
+
+A SIGTERM from the worker cancels the request and sends `cancel_job` for the
+remote job. The output goes to a temporary file the worker deletes after
+reading.
+
+Checked on 1 November 2026 against WanGP v19.02 started with `--offline` on a
+machine without a GPU. A NodeTool server with the adapter configured
+registered `wangp` and listed 172 video and 139 image models. Requests for
+`text_to_video` (with a compiled `camera.dolly-in` prompt), `image_to_video`
+(H3 FL2VA), `reference_to_video` (LTX-2.5 MSR, two images), `image_to_image`
+(Qwen Image Edit) and `text_to_image` (Flux) were accepted as jobs and failed
+only when WanGP reached the missing weights.
+
 ### Moving the combined pin to v19.02
 
 `Dockerfile.combined` still pins `362c3467`. Nothing here built the image. On 1

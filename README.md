@@ -14,6 +14,27 @@ redistribution is supported by the optional combined image below. Selling,
 white-labelling, or monetizing access to WanGP needs a separate written license;
 see [NOTICE.md](NOTICE.md).
 
+## Model licenses
+
+Each model Wan2GP downloads keeps its own license, separate from WanGP's and
+this package's. Read it before you use the model or what it makes. Two of the
+newest model lines carry terms that decide who may use them:
+
+- **MiniMax H3** (`minimax_h3_*`) is under the MiniMax H3 Community License
+  Agreement, shipped in Wan2GP as `models/minimax_h3/X2_VAE_LICENSE`. It grants
+  rights only outside its Excluded Territories: the European Union, the United
+  Kingdom, the Republic of Korea and the United States. It does not authorize
+  using the model or its outputs there. Commercial products and services must
+  display "MiniMax H3", and those with more than 20 million US dollars in yearly
+  revenue need MiniMax's written authorization.
+- **LTX-2** (`ltx2_*`) is under Lightricks'
+  [LTX-2 Community License Agreement](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2).
+  Entities with annual revenue of 10 million US dollars or more need a paid
+  commercial license from Lightricks.
+
+This summary is not legal advice, and license texts change. The license file
+or model card at the source is authoritative.
+
 ## Install Wan2GP
 
 Wan2GP needs its own conda environment and its own PyTorch build. Do not install
@@ -90,6 +111,39 @@ nodetool serve
 
 A desktop app launched from the Finder or the Start menu never sees a shell
 `export`. Set the URL in Settings there, or fill in the node's `server_url`.
+
+## Use your server in the composer and Create view
+
+The nodes above take a plain prompt. To pick Wan2GP models in the chat
+composer, the Create view and ejected preset workflows, where presets compile
+before the prompt is sent, run this package as NodeTool's `wangp` provider. Set
+these variables in the environment of the NodeTool Python worker that has the
+pack installed, then restart NodeTool:
+
+```bash
+export NODETOOL_PROVIDER_ADAPTER_COMMAND_WANGP=nodetool-wan2gp-provider
+export NODETOOL_PROVIDER_ADAPTER_CAPABILITIES_WANGP=text_to_video,image_to_video,reference_to_video,text_to_image,image_to_image
+export NODETOOL_PROVIDER_ADAPTER_DISPLAY_NAME_WANGP=Wan2GP
+export WAN2GP_MCP_URL=http://127.0.0.1:7866/mcp
+```
+
+`nodetool-wan2gp-provider` is installed with the pack. If the worker's `PATH`
+does not include it, give its full path or `<worker python> -m
+nodetool.nodes.wan2gp._provider`. The worker runs it once per request, and it
+talks to your server over MCP like the nodes do, so the model never loads in
+NodeTool. It lists the server's video and image models with the tasks their
+capabilities allow, uploads start and reference images through the gallery,
+and returns the first output. It does not send reference videos yet. Speech
+and music models stay with the nodes. `WAN2GP_PROVIDER_TIMEOUT_SECONDS`
+changes the 30-minute limit for one generation.
+
+NodeTool's Settings cannot set these variables yet. Set them in the
+environment NodeTool starts from. A desktop app started from the Finder or the
+Start menu does not see a shell `export`.
+
+On WanGP v19.02 the server listed 172 video and 139 image models through this
+adapter, and text, image and reference requests reached the server as jobs.
+No generation completed, because the test machine had no GPU.
 
 ## Combined non-commercial GPU image
 

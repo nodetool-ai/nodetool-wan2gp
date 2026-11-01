@@ -11,10 +11,6 @@ from pydantic import Field
 
 from ._base import SERVER_URL_DEFAULT, open_client
 
-#: The largest page API v2 search returns, and the most rows API v1 returns.
-_V2_PAGE_LIMIT = 100
-_V1_PAGE_LIMIT = 50
-
 #: The fields each returned row carries.
 _ROW_KEYS = ("model_type", "name", "family", "main_output", "outputs", "inputs", "media_inputs", "capabilities")
 
@@ -92,33 +88,8 @@ class ListModels(BaseNode):
 
     async def process(self, context: ProcessingContext) -> list[dict[str, Any]]:
         async with open_client(self.server_url) as client:
-            if client.legacy_api:
-                filters = self._filters()
-                filters.pop("capabilities", None)
-                page = await client.list_models(
-                    self.query, filters, limit=min(self.limit, _V1_PAGE_LIMIT)
-                )
-                return [_row(model) for model in page.get("models") or []][: self.limit]
-
-            rows: list[dict[str, Any]] = []
-            cursor: str | None = None
-            while len(rows) < self.limit:
-                page = await client.list_models(
-                    self.query,
-                    self._filters(),
-                    limit=min(self.limit - len(rows), _V2_PAGE_LIMIT),
-                    cursor=cursor,
-                )
-                for model in page.get("models") or []:
-                    if "media_inputs" not in model:
-                        # Without a query WanGP returns compact rows.
-                        model = await client.get_model_capabilities(str(model["model_type"]))
-                    rows.append(_row(model))
-                cursor = page.get("next_cursor")
-                if not page.get("has_more") or not cursor:
-                    break
-            return rows[: self.limit]
-
+            models = await client.search_all_models(self.query, self._filters(), self.limit)
+        return [_row(model) for model in models]
 
 def _row(model: dict[str, Any]) -> dict[str, Any]:
     return {key: model[key] for key in _ROW_KEYS if key in model}

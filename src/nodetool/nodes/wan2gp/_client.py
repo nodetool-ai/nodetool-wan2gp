@@ -316,6 +316,35 @@ class Wan2GPClient:
             args["cursor"] = cursor
         return await self.call_tool("wangp_models", {"action": "search", "arguments": args})
 
+    async def search_all_models(
+        self, query: str = "", filters: dict[str, Any] | None = None, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """Return up to ``limit`` models with their outputs, inputs and media roles.
+
+        API v2 pages with a cursor and returns compact rows for a search
+        without a query, so those rows are filled from each model's
+        capabilities. API v1 returns one page of at most 50 rows, without the
+        ``capabilities`` filter.
+        """
+        if self._legacy_api:
+            legacy_filters = {key: value for key, value in (filters or {}).items() if key != "capabilities"}
+            page = await self.list_models(query, legacy_filters, limit=min(limit, 50))
+            return list(page.get("models") or [])[:limit]
+        rows: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while len(rows) < limit:
+            page = await self.list_models(
+                query, filters, limit=min(limit - len(rows), 100), cursor=cursor
+            )
+            for model in page.get("models") or []:
+                if "media_inputs" not in model:
+                    model = await self.get_model_capabilities(str(model["model_type"]))
+                rows.append(model)
+            cursor = page.get("next_cursor")
+            if not page.get("has_more") or not cursor:
+                break
+        return rows[:limit]
+
     async def get_model_capabilities(self, model_type: str) -> dict[str, Any]:
         """Return one model's metadata: outputs, inputs, media roles and capabilities."""
         if self._legacy_api:

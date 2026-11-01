@@ -1,0 +1,70 @@
+{
+  "metadata": {
+    "model_type": "kiwi_edit",
+    "name": "Kiwi Edit Instruct-Reference 5B",
+    "family": "wan2_2",
+    "family_label": "Wan2.2",
+    "base_model_type": "kiwi_edit",
+    "finetune": false,
+    "main_output": [
+      "video"
+    ],
+    "outputs": [
+      "video"
+    ],
+    "inputs": [
+      "text",
+      "image",
+      "video"
+    ],
+    "capabilities": [
+      "text_to_video",
+      "video_to_video",
+      "reference_images",
+      "control_video",
+      "video_continuation",
+      "sliding_window",
+      "lora"
+    ],
+    "specialities": [
+      {
+        "name": "video editing",
+        "aliases": [
+          "edit video",
+          "instruction video editing"
+        ]
+      }
+    ],
+    "resolution_budget": 2088960,
+    "vae_block_size": 32,
+    "media_inputs": {
+      "image": [
+        "reference",
+        "single_reference"
+      ],
+      "video": [
+        "continue",
+        "last",
+        "control"
+      ]
+    },
+    "description": "Kiwi-Edit expects Prompt instructionss to Edit an existing video (for instance adding or removing objects or persons). You can reference an image to use it as a background or an object .",
+    "fps": 24,
+    "frames_minimum": 5,
+    "frames_steps": 4,
+    "frames_maximum": 121,
+    "accelerated": "profiles"
+  },
+  "input_guidance": {
+    "action": "definition",
+    "arguments": {
+      "property": "infos"
+    }
+  },
+  "prompt_guidance": {
+    "action": "definition",
+    "arguments": {
+      "property": "prompt_infos"
+    }
+  }
+}
