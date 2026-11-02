@@ -51,6 +51,14 @@ or model card at the source is authoritative.
 
 ## Install Wan2GP
 
+NodeTool's Package Manager installs Wan2GP for you: **Tools → Package Manager
+→ Engines & tools → Wan2GP**, or `nodetool runtime add wan2gp`. It downloads
+the pinned release and runs Wan2GP's own unattended installer, and NodeTool
+starts the server on demand. See NodeTool's
+[Wan2GP guide](https://github.com/nodetool-ai/nodetool/blob/main/docs/wan2gp.md).
+
+To run Wan2GP yourself instead, install it by hand:
+
 Wan2GP needs its own conda environment and its own PyTorch build. Do not install
 it into the NodeTool environment. From Wan2GP's `docs/INSTALLATION.md`, for
 RTX 20xx to RTX 50xx with CUDA 13.1:
