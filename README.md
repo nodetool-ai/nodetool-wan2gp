@@ -117,9 +117,14 @@ weights in `/workspace/wan2gp/models`, generated files in
 time it runs that model. The proxy speaks plain HTTP, so put TLS in front of
 it, or use a private network, when the server is not on your machine.
 
-This image was not built or run on a GPU for this release. The entrypoint and
-the proxy are tested here. Whether WanGP's requirements install on the CUDA
-12.8 base is untested.
+This image was not built or run on a GPU for this release. The entrypoint, the
+proxy and the healthcheck are tested here. The proxy and the healthcheck also
+ran in front of a WanGP v19.02 MCP server, started with `--offline` on a
+machine without a GPU: NodeTool's client listed 172 video and 139 image models
+through it, round-tripped a gallery upload, uploaded a custom file, and got the
+server's missing-weights error back from a generation. A request without the
+token got 401, and the proxy answered 502 once WanGP stopped. Whether WanGP's
+requirements install on the CUDA 12.8 base is untested.
 
 Review each model's separate license. This image is only for free,
 non-monetized use. Read [the combined-image license and attribution notes](docs/combined-image-licenses.md)

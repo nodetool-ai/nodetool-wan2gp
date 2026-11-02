@@ -91,6 +91,26 @@ def test_dockerfile_pins_wangp_v19_02_and_runs_no_nodetool_code() -> None:
     assert "combined/auth_proxy.py" in DOCKERFILE
 
 
+def test_healthcheck_never_opens_an_event_stream() -> None:
+    # WanGP answers a GET on /mcp that accepts text/event-stream with a stream
+    # that never ends, which would hang the healthcheck.
+    healthcheck = (ROOT / "scripts/combined-healthcheck.py").read_text()
+    assert '"Accept": "application/json"' in healthcheck
+    assert '"Accept": "text/event-stream"' not in healthcheck
+
+
+def test_healthcheck_reports_a_proxy_that_is_down() -> None:
+    result = subprocess.run(
+        ["python3", str(ROOT / "scripts/combined-healthcheck.py")],
+        env={"PATH": os.environ["PATH"], "WAN2GP_MCP_TOKEN": "t", "WAN2GP_MCP_PORT": "9"},
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert "The token proxy is not answering" in result.stderr
+
+
 def test_nothing_here_imports_wangp() -> None:
     for path in [ROOT / "combined/auth_proxy.py", ROOT / "scripts/combined-healthcheck.py"]:
         text = path.read_text()

@@ -2,8 +2,9 @@
 """Check that the token proxy and WanGP's MCP server both answer.
 
 The proxy answers 502 while WanGP is down and 401 to a wrong token. Any other
-status below 500 comes from WanGP itself: a bare GET on /mcp is refused by
-the MCP server, which proves it is listening.
+status below 500 comes from WanGP itself. A GET on /mcp that accepts only JSON
+gets 406 from the MCP server at once, which proves it is listening. Accepting
+an event stream would open one that never ends.
 """
 
 from __future__ import annotations
@@ -20,13 +21,15 @@ def main() -> None:
     port = int(os.environ.get("WAN2GP_MCP_PORT", "7866"))
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/mcp",
-        headers={"Authorization": f"Bearer {token}", "Accept": "text/event-stream"},
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
     )
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             status = response.status
     except urllib.error.HTTPError as error:
         status = error.code
+    except OSError as error:
+        raise SystemExit(f"The token proxy is not answering: {error}") from None
     if status == 401 or status >= 500:
         raise SystemExit(f"WanGP MCP is not ready (HTTP {status})")
 

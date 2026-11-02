@@ -13,8 +13,10 @@ The combined image runs two processes, both in WanGP's Python environment:
    502 while WanGP is not listening.
 
 The entrypoint stops the container when either process stops, with that
-process's exit status. The healthcheck asks the proxy for `/mcp` with the token
-and counts any answer from WanGP as healthy.
+process's exit status. The healthcheck asks the proxy for `/mcp` with the token,
+accepting only JSON, and counts any answer from WanGP as healthy. WanGP answers
+that request with 406 at once. A request that accepts an event stream would
+open one that never ends.
 
 No NodeTool code runs in the image. It holds no NodeTool database, secret store
 or master key, and no provider credential. NodeTool's `lib.wan2gp` nodes and
