@@ -13,8 +13,6 @@ on:
       - docs/combined-image-licenses.md
       - docs/combined-worker.md
       - NOTICE.md
-      - pyproject.toml
-      - src/**
       - .github/workflows/build-combined.yml
 
 permissions:

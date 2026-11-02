@@ -1,59 +1,21 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# This repository no longer ships a Python package. The Wan2GP nodes and the
+# wangp provider are built into NodeTool. What remains is the combined image's
+# token proxy and its tests.
 
 [project]
-name = "nodetool-wan2gp"
-version = "0.2.0"
-description = "Wan2GP nodes for Nodetool"
-readme = "README.md"
+name = "nodetool-wan2gp-combined"
+version = "0.3.0"
+description = "Tests and tooling for the combined WanGP MCP image"
 license = "AGPL-3.0-or-later"
-authors = [{ name = "Matthias Georgi", email = "matti.georgi@gmail.com" }]
-requires-python = ">=3.11"
-
-# Deliberately small. This package talks to a Wan2GP process the user runs
-# themselves, over MCP streamable HTTP. It never imports Wan2GP or mmgp, so it
-# needs no torch, no diffusers, and no model runtime of its own.
-#
-# mcp 2.x moved its transports from httpx to httpx2, and the media transfers
-# share the MCP client factory, so this package uses httpx2 directly as well.
-dependencies = [
-    "nodetool-core[audio]>=0.8.1",
-    "httpx2>=2.13.1",
-    "mcp>=2.3.0,<3",
-]
-
-# Node discovery: nodetool-core's worker reads this group and imports
-# nodetool.nodes.<value>.
-[project.entry-points."nodetool.namespaces"]
-wan2gp = "wan2gp"
-
-# The MCP provider adapter a NodeTool Python worker runs for the wangp provider.
-[project.scripts]
-nodetool-wan2gp-provider = "nodetool.nodes.wan2gp._provider:main"
-
-[project.urls]
-Repository = "https://github.com/nodetool-ai/nodetool-wan2gp"
+requires-python = ">=3.10"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28",
     "pytest>=8",
-    "pytest-asyncio>=0.24",
     "ruff",
-    "ty",
-]
-
-[tool.hatch.build.targets.sdist]
-exclude = [
-    "/.env",
-    "/.env.*",
-    "/.pi-subagents/",
-]
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/nodetool"]
-include = [
-    "src/nodetool/package_metadata/*.json",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
 ]
 
 [tool.ruff.lint]
@@ -63,5 +25,4 @@ ignore = [
 ]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
