@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Awaitable, Callable
+from pathlib import PurePosixPath
 from typing import Any
+from urllib.parse import unquote, urlparse
 
-from nodetool.metadata.types import AssetRef, ImageRef, VideoRef
+from nodetool.metadata.types import AssetRef, AudioRef, ImageRef, VideoRef
 from nodetool.workflows.base_node import BaseNode
 from nodetool.workflows.processing_context import ProcessingContext
 from nodetool.workflows.types import NodeProgress
@@ -41,6 +43,10 @@ def resolve_server_url(server_url: str | None) -> str:
     if explicit:
         return explicit
     return os.environ.get("WAN2GP_MCP_URL", "").strip() or DEFAULT_SERVER_URL
+
+def open_client(server_url: str | None) -> Wan2GPClient:
+    """Return an unconnected client for the node's server, for nodes that run no job."""
+    return Wan2GPClient(resolve_server_url(server_url))
 
 SettingsBuilder = Callable[[Wan2GPClient], Awaitable[dict[str, Any]]]
 
@@ -77,6 +83,50 @@ def video_filename(data: bytes) -> str:
     if data[:4] == b"RIFF" and data[8:12] == b"AVI ":
         return "video.avi"
     return "video.mp4"
+
+
+def audio_filename(data: bytes) -> str:
+    """Return an upload filename whose extension matches the audio bytes."""
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio.wav"
+    if data.startswith(b"fLaC"):
+        return "audio.flac"
+    if data.startswith(b"OggS"):
+        return "audio.opus" if b"OpusHead" in data[:64] else "audio.ogg"
+    if data[4:8] == b"ftyp":
+        return "audio.m4a"
+    if data.startswith(b"ID3") or data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio.mp3"
+    if data[:2] in (b"\xff\xf1", b"\xff\xf9"):
+        return "audio.aac"
+    return "audio.wav"
+
+
+def custom_filename(asset: AssetRef, explicit: str) -> str:
+    """Return the file name for a custom file, from the field or the asset URI.
+
+    Wan2GP checks a custom file by its extension, and bytes such as a NumPy
+    trajectory or an ABC score carry no reliable signature, so the name has to
+    come from the user or from the asset's own URI.
+    """
+    name = explicit.strip()
+    if not name and asset.uri:
+        name = PurePosixPath(unquote(urlparse(asset.uri).path)).name
+    if not name:
+        raise ValueError(
+            "Set custom_file_name to the file's name with its extension, for example trajectory.npy."
+        )
+    if name != PurePosixPath(name).name or "\\" in name or name in {".", ".."}:
+        raise ValueError(f"custom_file_name must be a file name without folders. Got {name!r}.")
+    if not PurePosixPath(name).suffix:
+        raise ValueError(f"custom_file_name needs an extension, for example .npy. Got {name!r}.")
+    return name
+
+
+#: Gallery media types NodeTool has no reference type for.
+_UNSUPPORTED_OUTPUTS = {
+    "world": "an interactive world (.wgpworld), which NodeTool has no asset type for",
+}
 
 
 class _Wan2GPNode(BaseNode):
@@ -127,6 +177,24 @@ class _Wan2GPNode(BaseNode):
         """Put a video in Wan2GP's gallery and return its ``media_id``."""
         data = await context.asset_to_bytes(video)
         return await client.upload_bytes(video_filename(data), data)
+
+    async def upload_audio(
+        self, context: ProcessingContext, client: Wan2GPClient, audio: AudioRef
+    ) -> str:
+        """Put an audio file in Wan2GP's gallery and return its ``media_id``."""
+        data = await context.asset_to_bytes(audio)
+        return await client.upload_bytes(audio_filename(data), data)
+
+    async def upload_custom_file(
+        self,
+        context: ProcessingContext,
+        client: Wan2GPClient,
+        asset: AssetRef,
+        filename: str,
+    ) -> str:
+        """Put a model's extra input file in the server workspace and return its path."""
+        data = await context.asset_to_bytes(asset)
+        return await client.upload_file(filename, data)
 
     # -- run loop ---------------------------------------------------------
 
@@ -212,6 +280,13 @@ class _Wan2GPNode(BaseNode):
             raise ValueError(job_error_message(job))
         items = result.get("gallery_items") or []
         if not items:
+            files = [PurePosixPath(str(path)).name for path in result.get("generated_files") or []]
+            if files:
+                raise ValueError(
+                    "Wan2GP finished the generation but put no media in its gallery, "
+                    f"only {', '.join(files)}. This node returns gallery media, so text "
+                    "results such as transcripts cannot be returned."
+                )
             raise ValueError(
                 "Wan2GP finished the generation but put no media in its gallery."
             )
@@ -222,7 +297,12 @@ class _Wan2GPNode(BaseNode):
         media_type = str(item.get("media_type") or "").strip().lower()
         if not media_id:
             raise ValueError("Wan2GP returned a gallery item without a media_id.")
-        if media_type not in {"image", "video", "audio"}:
+        if media_type in _UNSUPPORTED_OUTPUTS:
+            raise ValueError(
+                f"Wan2GP returned {_UNSUPPORTED_OUTPUTS[media_type]}. "
+                "Pick a model whose main output is an image, video, audio or 3D model."
+            )
+        if media_type not in {"image", "video", "audio", "3d"}:
             raise ValueError(f"Wan2GP returned an unsupported gallery media_type: {media_type or '(missing)'}.")
         if expected_media_type is not None and media_type != expected_media_type:
             raise ValueError(
@@ -233,4 +313,7 @@ class _Wan2GPNode(BaseNode):
             return await context.image_from_bytes(data)
         if media_type == "audio":
             return await context.audio_from_bytes(data)
+        if media_type == "3d":
+            suffix = PurePosixPath(str(item.get("filename") or "")).suffix.lower()
+            return await context.model3d_from_bytes(data, format=suffix.lstrip(".") or "glb")
         return await context.video_from_bytes(data)

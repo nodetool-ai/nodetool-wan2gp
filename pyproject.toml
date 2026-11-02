@@ -28,6 +28,10 @@ dependencies = [
 [project.entry-points."nodetool.namespaces"]
 wan2gp = "wan2gp"
 
+# The MCP provider adapter a NodeTool Python worker runs for the wangp provider.
+[project.scripts]
+nodetool-wan2gp-provider = "nodetool.nodes.wan2gp._provider:main"
+
 [project.urls]
 Repository = "https://github.com/nodetool-ai/nodetool-wan2gp"
 

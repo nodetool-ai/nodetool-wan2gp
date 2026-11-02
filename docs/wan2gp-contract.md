@@ -22,6 +22,86 @@ run against this version.
 | Model defaults | `wangp_model(model_type=..., action="defaults", arguments={})` |
 | Search models | `wangp_models(action="search", arguments={"query": ..., "limit": ...})` |
 
+| Upload a workspace file | `wangp_session(action="create_file_upload", arguments={"filename": ..., "size_bytes": ...})` |
+| Model capabilities | `wangp_model(model_type=..., action="capabilities")` |
+| Validate settings | `wangp_validate(settings={...})` |
+
+### Media settings the Generate node sends
+
+Confirmed on 1 November 2026 against WanGP v19.02 (`616e605`) with
+`wangp_validate`, run on a machine without a GPU, so no generation backed these
+rows. The settings came from the node's own `build_settings` with real uploads.
+Every case reported `valid: true` and listed the role among the inputs it read.
+
+| Node input | Setting | Mode WanGP turned on | Model checked |
+| --- | --- | --- | --- |
+| `image` | `image_start` | `image_prompt_type` `S` | `ti2v_2_2_fastwan` |
+| `image_end` | `image_end` | `image_prompt_type` `SE` with `image` | `minimax_h3_fl2va_pruned` |
+| `reference_images` | `image_refs`, a list of media ids | `video_prompt_type` `KI` | `ltx2_25_22B_msr`, two images |
+| `reference_images` with `video` | `image_refs`, `video_guide` | `video_prompt_type` `UVI` | `kiwi_edit` |
+| `video` with `video_mask` | `video_guide`, `video_mask` | none: `video_prompt_type` `VA` came from settings | `ltx2_25_22B_distilled` |
+| `source_video` | `video_source` | `image_prompt_type` `TV` | `ti2v_2_2_fastwan` |
+| `audio` | `audio_guide` | `audio_prompt_type` `A` | `ltx2_25_22B_distilled` |
+| `custom_file` | `custom_guide`, a workspace path | from the model's `custom_file` declaration | `wanmove` (`.npy`), `yue2` (`.abc`) |
+| `reference_images` | `image_refs` | `video_prompt_type` `I` | `trellis2_shape`, a 3D model |
+
+WanGP infers the start, end, continuation, reference and audio modes from the
+media it receives (`apply_media_flag_defaults` in `shared/api.py`). It does not
+infer the control and mask modes: `video_guide` without a `V` in
+`video_prompt_type` fails with `input would be ignored; requires an enabled
+Control or Reference Video mode`. The node leaves that mode to `settings`.
+
+`image_refs` takes a list. Audio goes through the gallery upload like images
+and video, and comes back as an `audio:` media id.
+
+### Custom files
+
+The gallery refuses files that are not image, video, audio, 3D or world media,
+such as Wan-Move's `.npy` trajectory or YuE's `.abc` score.
+`create_file_upload` takes any file name. The client sends `size_bytes`, then
+PUTs the raw bytes to the returned `/wangp_api/files/upload/<token>` URL. A
+complete upload finalizes itself and answers:
+
+```json
+{"status": "done", "offset": 2720, "size_bytes": 2720, "filename": "traj.npy",
+ "path": "@documents/uploads/<id>/traj.npy", "mime_type": "application/octet-stream"}
+```
+
+`custom_guide` accepts that `path` on a server started without
+`--mcp-allow-read-file-system`. It is a handle the server issued, not a path
+from the NodeTool machine. `wanmove` without `custom_guide` fails validation
+with `custom_guide is required for the selected input mode.`
+
+`wangp_model(action="capabilities")` returns the declaration under
+`metadata.media_inputs.custom_file`, for example
+`{"name": "ABC Score", "file_types": [".abc"], "required": true,
+"audio_prompt_type": "1"}` for `yue2`. Its defaults use `audio_prompt_type`
+`"0"`, which ignores the score, and `wangp_validate` still reports the request
+as valid. When `custom_file` is connected, Generate applies the declared
+`model_mode`, `video_prompt_type` or `audio_prompt_type` unless the user's
+settings set it. API v1 has no workspace uploads, so the node refuses
+`custom_file` there.
+
+### Outputs
+
+A finished job's `gallery_items[].media_type` is `image`, `video`, `audio`,
+`3d` or `world` (`_gallery_media_type` in `shared/mcp/server.py`). Generate
+returns a `Model3DRef` for `3d`, with the format taken from the item's file
+extension. NodeTool has no reference type for `world`, so Generate fails with a
+message that names it. The two transcription models
+(`nemotron_transcribe`, `nemotron_transcribe_q4`) list `text` as an output.
+Their result shape was not observed, since no model ran. When a finished job
+has no gallery item, Generate names the generated files in its error.
+
+### Model search
+
+`wangp_models(action="search")` pages with `cursor` and `next_cursor`, up to 100
+rows a page. A search with a `query` returns full rows including
+`media_inputs`. A search without one returns compact rows (`model_type`, `name`
+and sizes), so ListModels reads `wangp_model(action="capabilities")` for each.
+`filters` takes `main_output`, `inputs` and `capabilities` (a list). The live
+server listed 291 models: 173 with a video output, 16 with a 3D output.
+
 Asynchronous jobs are off by default on a headless server, so it must be started
 with `--mcp-async`. `--mcp-webui` always allows them.
 
@@ -406,3 +486,99 @@ are sent as `video_guide` and `video_guide2`, selecting the advertised `V-U` or
 Unsupported media kinds, counts, missing models, and missing task
 support fail before `run_task`. Audio is enabled only when a reference video
 is present and WanGP advertises a `K` audio source choice.
+
+### The MCP provider adapter
+
+`_provider.py` speaks the NodeTool worker's provider adapter protocol, the
+same one `combined/provider_adapter.py` speaks, but answers every request over
+MCP. It reads one JSON request line and writes `progress` events and one
+`result` as JSON lines. Library logs go to stderr, because the module keeps a
+private copy of stdout for events.
+
+| Operation | What it sends |
+| --- | --- |
+| `models` | `wangp_models` search with `filters.main_output` of `video` or `image`, then each model's capabilities |
+| `text_to_video` | `model_type`, `prompt` and the mapped settings below |
+| `image_to_video` | the staged image as `image_start` |
+| `reference_to_video` | the staged images, in order, as `image_refs`. Reference videos are refused |
+| `text_to_image` | `image_mode: 1`, which selects the image output of models that also make video |
+| `image_to_image` | the image as `image_start` or `image_refs`, from the model's `media_inputs.image` roles |
+
+A video model offers `text_to_video`, `image_to_video` and
+`reference_to_video` when its capabilities list `text_to_video`,
+`image_to_video` and `reference_images`. An image model offers
+`text_to_image` and `image_to_image` the same way. Parameters are read in
+snake_case or camelCase: `negativePrompt`, `numInferenceSteps`, `seed`,
+`guidanceScale`, `strength` (as `denoising_strength`), `numFrames` (as
+`video_length`), `durationSeconds` (as `"<n>s"`), and `resolution` with
+`aspectRatio`, where a tier such as `720p` sets the short side. `width` and
+`height`, or `targetWidth` and `targetHeight`, give a size instead.
+
+A SIGTERM from the worker cancels the request and sends `cancel_job` for the
+remote job. The output goes to a temporary file the worker deletes after
+reading.
+
+Checked on 1 November 2026 against WanGP v19.02 started with `--offline` on a
+machine without a GPU. A NodeTool server with the adapter configured
+registered `wangp` and listed 172 video and 139 image models. Requests for
+`text_to_video` (with a compiled `camera.dolly-in` prompt), `image_to_video`
+(H3 FL2VA), `reference_to_video` (LTX-2.5 MSR, two images), `image_to_image`
+(Qwen Image Edit) and `text_to_image` (Flux) were accepted as jobs and failed
+only when WanGP reached the missing weights.
+
+### Moving the combined pin to v19.02
+
+`Dockerfile.combined` still pins `362c3467`. Nothing here built the image. On 1
+November 2026 the adapter in `combined/` ran against a WanGP v19.02 checkout
+(`616e605`) in its own interpreter, on a machine without a GPU, with CUDA
+queries stubbed outside the WanGP tree. No model loaded and `run_task` was not
+called.
+
+What still works:
+
+- `shared.api.init`, `list_model_metadata`, `get_model_metadata`, `run_task`,
+  `GenerationResult` and `GeneratedArtifact` keep the names and fields the
+  adapter uses. `prepare_model.py`'s calls into `wgp` (`get_model_def`,
+  `get_model_filename`, `get_model_recursive_prop`, `download_models` and the
+  quantization globals) keep compatible signatures.
+- The `models` operation returned 172 video models (170 text to video, 101
+  image to video, 69 reference to video), 139 image, 17 speech and 17 music
+  models. `ltx2_25_22B_alpha_gen` is the one video model it leaves out.
+- `_settings` built 612 requests, one for each model and operation, without an
+  error. 493 of them passed `wangp_validate` once their file paths were swapped
+  for gallery ids.
+
+What breaks or degrades:
+
+1. 66 requests fail because the model needs `image_refs`: text to video or
+   text to image on reference-only models such as `phantom_14B`, `standin`,
+   `lynx`, `kiwi_edit`, `ltx2_25_22B_msr` and the Flux Kontext and Qwen edit
+   models. WanGP's `text_to_video` capability does not say that a reference is
+   required, so the adapter offers tasks those models cannot run.
+2. Models with locked resolutions (`evoke_turbo`, `flux_dev_umo`,
+   `k5_lite_t2v_10s_distil_sparse`, `k5_pro_t2v_10s_sft_sparse`) reject the
+   adapter's tier conversion, such as `480p` to `853x480`. The adapter ignores
+   `allowed_resolutions`.
+3. `wanmove` fails without `custom_guide`, which the provider protocol has no
+   field for. `yue2` ignores its score in the default mode.
+4. Text to speech sends `audio_guide` whenever a reference voice is attached.
+   `qwen3_tts_customvoice` and `qwen3_tts_voicedesign` take none, and MCP
+   validation rejects it. `run_task` may ignore it instead. That was not run.
+5. v19.02 vendors mmgp 4.5.0 in its `mmgp/` folder instead of installing
+   `mmgp==3.7.14` from PyPI. The image's separate `MMGP_COMMIT` checkout, which
+   supplies the mmgp licence and attribution, would no longer describe the
+   mmgp code that runs. The attribution must point at the vendored copy.
+6. The requirements add `comfy-kitchen==0.2.35` and `optimum-quanto==0.2.7`,
+   which mmgp needed from PyPI before. Both commits ask for the CUDA 13 nightly
+   `onnxruntime-gpu` while the image installs CUDA 12.8 PyTorch. Whether the
+   new set installs in the image is untested.
+7. The adapter uses none of the inputs added since the pin: reference videos
+   (`media_inputs.video.reference`, 12 video models), end images, audio-driven
+   video and 3D outputs.
+
+These are not adapter faults: 16 requests to `animate`, `scail`, `mocha`,
+`steadydancer` and four other models fail inside WanGP with
+`could not convert string to float: 'control'`, which a bare
+`{"model_type": "scail", "prompt": "x"}` reproduces. The remaining failures
+came from the probe request itself: 17 frames is too short for a 3-second voice
+clip and for Ovi's sliding window.

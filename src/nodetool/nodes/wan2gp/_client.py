@@ -291,19 +291,69 @@ class Wan2GPClient:
             return await self.call_tool(f"wangp_{action}", args)
         return await self.call_tool("wangp_session", {"action": action, "arguments": args})
 
+    @property
+    def legacy_api(self) -> bool:
+        """True when the server speaks MCP API v1."""
+        return self._legacy_api
+
     async def list_models(
         self,
         query: str = "",
         filters: dict[str, Any] | None = None,
         limit: int = 10,
+        cursor: str | None = None,
     ) -> dict[str, Any]:
-        """Search Wan2GP's model registry. See ``wangp_models``."""
+        """Search Wan2GP's model registry and return one page. See ``wangp_models``.
+
+        API v2 pages with ``cursor``, from the previous page's ``next_cursor``.
+        """
         args: dict[str, Any] = {"query": query, "limit": limit}
         if filters:
             args["filters"] = filters
         if self._legacy_api:
             return await self.call_tool("wangp_models", args)
+        if cursor:
+            args["cursor"] = cursor
         return await self.call_tool("wangp_models", {"action": "search", "arguments": args})
+
+    async def search_all_models(
+        self, query: str = "", filters: dict[str, Any] | None = None, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """Return up to ``limit`` models with their outputs, inputs and media roles.
+
+        API v2 pages with a cursor and returns compact rows for a search
+        without a query, so those rows are filled from each model's
+        capabilities. API v1 returns one page of at most 50 rows, without the
+        ``capabilities`` filter.
+        """
+        if self._legacy_api:
+            legacy_filters = {key: value for key, value in (filters or {}).items() if key != "capabilities"}
+            page = await self.list_models(query, legacy_filters, limit=min(limit, 50))
+            return list(page.get("models") or [])[:limit]
+        rows: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while len(rows) < limit:
+            page = await self.list_models(
+                query, filters, limit=min(limit - len(rows), 100), cursor=cursor
+            )
+            for model in page.get("models") or []:
+                if "media_inputs" not in model:
+                    model = await self.get_model_capabilities(str(model["model_type"]))
+                rows.append(model)
+            cursor = page.get("next_cursor")
+            if not page.get("has_more") or not cursor:
+                break
+        return rows[:limit]
+
+    async def get_model_capabilities(self, model_type: str) -> dict[str, Any]:
+        """Return one model's metadata: outputs, inputs, media roles and capabilities."""
+        if self._legacy_api:
+            raise Wan2GPError("Model capabilities need a Wan2GP server with MCP API v2 or later.")
+        result = await self.call_tool("wangp_model", {"model_type": model_type, "action": "capabilities"})
+        metadata = result.get("metadata") if isinstance(result, dict) else None
+        if not isinstance(metadata, dict):
+            raise Wan2GPError(f"Wan2GP returned no capabilities for {model_type}.")
+        return metadata
 
     async def get_model_defaults(self, model_type: str) -> dict[str, Any]:
         """Return one model's pristine generation defaults."""
@@ -371,6 +421,43 @@ class Wan2GPClient:
         if not media_id:
             raise Wan2GPError(f"Wan2GP accepted the upload of {filename} but returned no media_id.")
         return media_id
+
+    async def upload_file(self, filename: str, data: bytes) -> str:
+        """Upload a file to the server's workspace and return its server path.
+
+        This is for a model's extra input file, such as a Wan-Move trajectory
+        (``.npy``) or a YuE score (``.abc``), which the media gallery refuses.
+        The returned path is the handle the server issued, for example
+        ``@documents/uploads/<id>/trajectory.npy``, and ``custom_guide``
+        accepts it. API v1 servers have no workspace uploads.
+        """
+        if self._legacy_api:
+            raise Wan2GPError(
+                "Uploading a custom file needs a Wan2GP server with MCP API v2 or later."
+            )
+        if not filename or Path(filename).name != filename or not Path(filename).suffix:
+            raise Wan2GPError(f"Invalid upload file name: {filename!r}.")
+        ticket = await self._session_action(
+            "create_file_upload", {"filename": filename, "size_bytes": len(data)}
+        )
+        url, limit = self._transfer_url(ticket, "upload_url", "PUT")
+        if len(data) > limit:
+            raise Wan2GPError(f"Upload of {filename} exceeds the {limit} byte transfer limit.")
+        response = await self.media_client.request(
+            "PUT",
+            url,
+            content=data,
+            headers={"content-type": "application/octet-stream"},
+        )
+        if response.status_code < 200 or response.status_code >= 300:
+            raise Wan2GPError(
+                f"Wan2GP rejected the upload of {filename}: {response.status_code} {response.text}"
+            )
+        record = response.json()
+        path = str(record.get("path") or "").strip()
+        if record.get("status") != "done" or not path:
+            raise Wan2GPError(f"Wan2GP did not finish the upload of {filename}.")
+        return path
 
     async def download_media(self, media_id: str) -> bytes:
         """Download one gallery item by ``media_id`` and return its bytes."""

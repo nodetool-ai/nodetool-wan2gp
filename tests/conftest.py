@@ -72,7 +72,12 @@ class FakeWan2GP:
         self.requests: list[dict[str, Any]] = []
         self.tool_calls: list[dict[str, Any]] = []
         self.uploads: dict[str, bytes] = {}
+        # Every gallery upload body in arrival order. The ticket fixture reuses one token.
+        self.upload_bodies: list[bytes] = []
         self.upload_filenames: dict[str, str] = {}
+        # Workspace uploads from create_file_upload, keyed by token.
+        self.file_uploads: dict[str, bytes] = {}
+        self.file_upload_names: dict[str, str] = {}
         self.cancelled_jobs: list[str] = []
         # Snapshots get_job returns, in order. The last one repeats.
         self.job_snapshots: list[dict[str, Any]] = [fixture("job_done")]
@@ -82,16 +87,25 @@ class FakeWan2GP:
         # Tool name -> message. A listed tool answers with isError instead.
         self.tool_errors: dict[str, str] = {}
         self._get_job_index = 0
+        # Pages wangp_models search returns in order, or None for models.json.
+        self.model_pages: list[dict[str, Any]] | None = None
+        self._model_page_index = 0
 
     # -- tool implementations -------------------------------------------
 
     def tool_result(self, name: str, args: dict[str, Any]) -> Any:
         if name == "wangp_models":
-            return fixture("models")
+            if self.model_pages is None:
+                return fixture("models")
+            page = self.model_pages[min(self._model_page_index, len(self.model_pages) - 1)]
+            self._model_page_index += 1
+            return page
         if name == "wangp_model":
             view = args.get("view") if self.legacy else args.get("action")
             if view == "defaults":
                 return fixture(f"model_defaults_{args['model_type']}")
+            if view == "capabilities":
+                return fixture(f"model_capabilities_{args['model_type']}")
             return {"model_type": args["model_type"], "view": view or "schema"}
         if name == "wangp_generate":
             if ("source" if self.legacy else "settings") not in args:
@@ -121,6 +135,17 @@ class FakeWan2GP:
             token = ticket["upload_url"].rsplit("/", 1)[-1]
             self.upload_filenames[token] = args["filename"]
             return ticket
+        if action == "create_file_upload" and not self.legacy:
+            token = f"filetoken{len(self.file_upload_names)}"
+            self.file_upload_names[token] = args["filename"]
+            return {
+                "token": token,
+                "filename": args["filename"],
+                "expires_in_seconds": 86400,
+                "max_bytes": 8589934592,
+                "upload_url": f"/wangp_api/files/upload/{token}",
+                "method": "PUT",
+            }
         if action == "create_gallery_download":
             ticket = dict(fixture("gallery_download_ticket"))
             ticket["media_id"] = args["media_id"]
@@ -227,9 +252,26 @@ class FakeWan2GP:
         if path.startswith("/wangp_api/gallery/upload/") and method == "PUT":
             token = path.rsplit("/", 1)[-1]
             self.uploads[token] = body
+            self.upload_bodies.append(body)
             result = dict(fixture("gallery_upload_result"))
             result["size"] = len(body)
             result["filename"] = self.upload_filenames.get(token, result["filename"])
+            await _send(send, 200, json.dumps(result).encode(), "application/json")
+            return
+
+        if path.startswith("/wangp_api/files/upload/") and method == "PUT":
+            token = path.rsplit("/", 1)[-1]
+            self.file_uploads[token] = body
+            filename = self.file_upload_names[token]
+            # The shape WanGP v19.02 returns for a finished workspace upload.
+            result = {
+                "status": "done",
+                "offset": len(body),
+                "size_bytes": len(body),
+                "filename": filename,
+                "path": f"@documents/uploads/{token}/{filename}",
+                "mime_type": "application/octet-stream",
+            }
             await _send(send, 200, json.dumps(result).encode(), "application/json")
             return
 
