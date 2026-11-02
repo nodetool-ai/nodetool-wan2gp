@@ -1,104 +1,75 @@
 # syntax=docker/dockerfile:1.7
 # Free, non-monetized evaluation image. See NOTICE.md and
 # docs/combined-image-licenses.md before building or redistributing it.
-ARG CORE_IMAGE=ghcr.io/nodetool-ai/nodetool:latest
-FROM ${CORE_IMAGE}
+#
+# It runs WanGP's own MCP server behind a bearer-token proxy. NodeTool's
+# built-in lib.wan2gp nodes and wangp provider connect to it over HTTP with
+# WAN2GP_MCP_URL and WAN2GP_MCP_TOKEN. No NodeTool code runs in this image.
+#
+# The base, Python and PyTorch follow WanGP's own Dockerfile at the pinned
+# revision: CUDA 12.8 on Ubuntu 22.04, whose Python 3.10 makes WanGP's
+# requirements pick the stable onnxruntime-gpu 1.22.0.
+ARG CUDA_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
+FROM ${CUDA_IMAGE}
 
-ARG NODETOOL_CORE_REPOSITORY=https://github.com/nodetool-ai/nodetool-core.git
-ARG NODETOOL_CORE_COMMIT=e53b334aa3b659c92baa2307c11ed8a7308f19c3
 ARG WANGP_REPOSITORY=https://github.com/deepbeepmeep/Wan2GP.git
-ARG WANGP_COMMIT=362c3467a70e1136ceb52eec95907205a8f88543
-ARG MMGP_REPOSITORY=https://github.com/deepbeepmeep/mmgp.git
-ARG MMGP_COMMIT=589ba050d320c4df879f48d11b23d6a88e6c68c8
+# WanGP v19.02, MCP API v2.1.
+ARG WANGP_COMMIT=616e60506aff10086bbbde02a3bf4554c572adde
 
-LABEL org.opencontainers.image.title="NodeTool WanGP non-commercial GPU worker" \
-      org.opencontainers.image.description="Authenticated direct-Python WanGP provider worker; free non-monetized evaluation only" \
-      org.opencontainers.image.licenses="AGPL-3.0-or-later AND LicenseRef-WanGP-Community-2.0 AND LicenseRef-mmGP-NonCommercial" \
+LABEL org.opencontainers.image.title="WanGP MCP server for NodeTool (non-commercial)" \
+      org.opencontainers.image.description="WanGP's MCP server behind a bearer-token proxy; free non-monetized evaluation only" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later AND LicenseRef-WanGP-Community-2.0" \
       org.opencontainers.image.source="https://github.com/nodetool-ai/nodetool-wan2gp" \
-      io.nodetool.core.commit="e53b334aa3b659c92baa2307c11ed8a7308f19c3" \
-      io.nodetool.wangp.commit="362c3467a70e1136ceb52eec95907205a8f88543" \
-      io.nodetool.mmgp.commit="589ba050d320c4df879f48d11b23d6a88e6c68c8" \
+      io.nodetool.wangp.commit="616e60506aff10086bbbde02a3bf4554c572adde" \
       io.nodetool.commercial-use="prohibited-without-separate-written-license"
 
-USER root
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential cmake ffmpeg git libgl1 libglib2.0-0 libportaudio2 \
-        libsndfile1 ninja-build python3-dev \
+        ca-certificates ffmpeg git libgl1 libglib2.0-0 libportaudio2 \
+        libsndfile1 python3 python3-dev python3-venv build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Pin the worker protocol implementation independently of the moving base
-# image and install its declared runtime dependencies. The base image does not
-# guarantee that the Python worker environment is already populated.
-RUN /opt/venv/bin/python -m pip install \
-    "git+${NODETOOL_CORE_REPOSITORY}@${NODETOOL_CORE_COMMIT}"
-
-# WanGP deliberately lives in a separate environment because its pinned
-# dependencies conflict with the NodeTool environment.
-RUN /opt/venv/bin/python -m venv --copies /opt/wan2gp-venv \
+RUN python3 -m venv --copies /opt/wan2gp-venv \
     && /opt/wan2gp-venv/bin/python -m pip install --upgrade pip setuptools wheel \
     && /opt/wan2gp-venv/bin/python -m pip install \
         torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
         --index-url https://download.pytorch.org/whl/cu128
 
+# WanGP vendors mmgp in its mmgp/ folder, under the WanGP Community License
+# 2.0. Its LICENSE.txt, mmgp/LICENSE.md and docs/third_party_licenses stay in
+# this checkout.
 RUN git clone --filter=blob:none "${WANGP_REPOSITORY}" /opt/Wan2GP \
     && git -C /opt/Wan2GP fetch --depth 1 origin "${WANGP_COMMIT}" \
     && git -C /opt/Wan2GP checkout --detach "${WANGP_COMMIT}" \
-    && /opt/wan2gp-venv/bin/python -m pip install -r /opt/Wan2GP/requirements.txt
+    && /opt/wan2gp-venv/bin/python -m pip install -r /opt/Wan2GP/requirements.txt \
+    && rm -rf /root/.cache/pip
 
-# Preserve the separately licensed mmgp terms explicitly, in addition to the
-# metadata installed by pip. WanGP's LICENSE.txt and third-party license tree
-# remain in the revision-pinned source checkout at /opt/Wan2GP.
-RUN mkdir -p /opt/licenses/mmgp \
-    && git clone --filter=blob:none "${MMGP_REPOSITORY}" /tmp/mmgp-license \
-    && git -C /tmp/mmgp-license fetch --depth 1 origin "${MMGP_COMMIT}" \
-    && git -C /tmp/mmgp-license checkout --detach "${MMGP_COMMIT}" \
-    && cp /tmp/mmgp-license/LICENSE.md /opt/licenses/mmgp/LICENSE.md \
-    && printf '%s\n' \
-        'mmgp by DeepBeepMeep' \
-        'https://github.com/deepbeepmeep/mmgp' \
-        "Pinned revision: ${MMGP_COMMIT}" \
-        'No local modifications.' \
-        > /opt/licenses/mmgp/ATTRIBUTION.txt \
-    && rm -rf /tmp/mmgp-license
-
-COPY . /tmp/nodetool-wan2gp
-RUN mkdir -p /opt/licenses/nodetool-wan2gp \
-    && cp /tmp/nodetool-wan2gp/NOTICE.md /opt/licenses/nodetool-wan2gp/NOTICE.md \
-    && cp /tmp/nodetool-wan2gp/docs/combined-image-licenses.md \
-        /opt/licenses/nodetool-wan2gp/combined-image-licenses.md \
-    && cp /tmp/nodetool-wan2gp/docs/combined-worker.md \
-        /opt/licenses/nodetool-wan2gp/combined-worker.md \
-    && rm -rf /tmp/nodetool-wan2gp /root/.cache/pip /tmp/* /var/tmp/*
-
+COPY NOTICE.md docs/combined-image-licenses.md docs/combined-worker.md /opt/licenses/nodetool-wan2gp/
 COPY scripts/combined-entrypoint.sh /usr/local/bin/nodetool-wangp-entrypoint
 COPY scripts/combined-healthcheck.py /usr/local/bin/nodetool-wangp-healthcheck
-COPY combined /opt/nodetool-wan2gp-combined
-RUN chmod 0755 /usr/local/bin/nodetool-wangp-entrypoint \
-        /usr/local/bin/nodetool-wangp-healthcheck \
-        /opt/nodetool-wan2gp-combined/prepare_model.py \
-        /opt/nodetool-wan2gp-combined/provider_adapter.py \
+COPY combined/auth_proxy.py /opt/nodetool-wan2gp-combined/auth_proxy.py
+RUN chmod 0755 /usr/local/bin/nodetool-wangp-entrypoint /usr/local/bin/nodetool-wangp-healthcheck \
     && mkdir -p /workspace/wan2gp/config /workspace/wan2gp/models \
         /workspace/wan2gp/outputs /workspace/cache \
-    && ln -s /workspace/wan2gp/models /opt/Wan2GP/ckpts
+    && rm -rf /opt/Wan2GP/ckpts /opt/Wan2GP/outputs \
+    && ln -s /workspace/wan2gp/models /opt/Wan2GP/ckpts \
+    && ln -s /workspace/wan2gp/outputs /opt/Wan2GP/outputs
 
 ENV WANGP_CONFIG_DIR=/workspace/wan2gp/config \
     WANGP_MODEL_DIR=/workspace/wan2gp/models \
     WANGP_OUTPUT_DIR=/workspace/wan2gp/outputs \
     WANGP_ROOT=/opt/Wan2GP \
-    NODETOOL_MODEL_PREPARE_COMMAND_WANGP="/opt/wan2gp-venv/bin/python /opt/nodetool-wan2gp-combined/prepare_model.py" \
-    NODETOOL_PROVIDER_ADAPTER_COMMAND_WANGP="/opt/wan2gp-venv/bin/python /opt/nodetool-wan2gp-combined/provider_adapter.py" \
-    NODETOOL_PROVIDER_ADAPTER_CAPABILITIES_WANGP="text_to_video,image_to_video,reference_to_video,text_to_image,image_to_image,text_to_audio,text_to_speech_encoded" \
-    NODETOOL_PROVIDER_ADAPTER_DISPLAY_NAME_WANGP="WanGP" \
+    WAN2GP_MCP_PORT=7866 \
+    WANGP_UPSTREAM_PORT=7867 \
     HF_HOME=/workspace/cache/huggingface \
     PYTHONUNBUFFERED=1 \
     SDL_AUDIODRIVER=dummy \
     PULSE_RUNTIME_PATH=/tmp/pulse-runtime
 
-WORKDIR /app
-EXPOSE 7777
-HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=8 \
-    CMD ["/opt/venv/bin/python", "/usr/local/bin/nodetool-wangp-healthcheck"]
+EXPOSE 7866
+HEALTHCHECK --interval=15s --timeout=5s --start-period=300s --retries=8 \
+    CMD ["/opt/wan2gp-venv/bin/python", "/usr/local/bin/nodetool-wangp-healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/nodetool-wangp-entrypoint"]

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
+# Start WanGP's MCP server on the container's loopback and publish it through
+# the bearer-token proxy. NodeTool connects with WAN2GP_MCP_URL and
+# WAN2GP_MCP_TOKEN. The container stops when either process stops.
 set -Eeuo pipefail
 
 if [[ "${WAN2GP_ACCEPT_LICENSE:-}" != "1" ]]; then
     echo "Refusing to start: review the bundled licenses and set WAN2GP_ACCEPT_LICENSE=1." >&2
     exit 64
 fi
-if [[ -z "${NODETOOL_WORKER_TOKEN:-}" ]]; then
-    echo "Refusing to start: NODETOOL_WORKER_TOKEN must be non-empty." >&2
+if [[ -z "${WAN2GP_MCP_TOKEN:-}" ]]; then
+    echo "Refusing to start: WAN2GP_MCP_TOKEN must be non-empty." >&2
     exit 64
 fi
 
@@ -20,50 +23,49 @@ if [[ "${workspace_dir}" != /* ]]; then
     exit 64
 fi
 
-worker_host="${NODETOOL_WORKER_HOST:-0.0.0.0}"
-worker_port="${NODETOOL_WORKER_PORT:-7777}"
-if [[ ! "${worker_port}" =~ ^[0-9]{1,5}$ ]] || (( 10#${worker_port} < 1 || 10#${worker_port} > 65535 )); then
-    echo "Refusing to start: NODETOOL_WORKER_PORT must be an integer from 1 to 65535." >&2
+valid_port() {
+    [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
+}
+public_port="${WAN2GP_MCP_PORT:-7866}"
+upstream_port="${WANGP_UPSTREAM_PORT:-7867}"
+for port in "${public_port}" "${upstream_port}"; do
+    if ! valid_port "${port}"; then
+        echo "Refusing to start: ports must be integers from 1 to 65535, got ${port}." >&2
+        exit 64
+    fi
+done
+if [[ "${public_port}" == "${upstream_port}" ]]; then
+    echo "Refusing to start: WAN2GP_MCP_PORT and WANGP_UPSTREAM_PORT must differ." >&2
     exit 64
 fi
 
 config_dir="${WANGP_CONFIG_DIR:-${workspace_dir}/wan2gp/config}"
 model_dir="${WANGP_MODEL_DIR:-${workspace_dir}/wan2gp/models}"
 output_dir="${WANGP_OUTPUT_DIR:-${workspace_dir}/wan2gp/outputs}"
-config_path="${config_dir}/wgp_config.json"
-export WANGP_CONFIG_PATH="${config_path}"
 export HF_HOME="${HF_HOME:-${workspace_dir}/cache/huggingface}"
-
 mkdir -p "${config_dir}" "${model_dir}" "${output_dir}" "${HF_HOME}"
 
-# WanGP owns its config schema and creates a complete default file when none is
-# present. Archive the incomplete three-key file produced by combined images
-# before this fix, then let the pinned upstream revision initialize it.
-/opt/venv/bin/python - "${config_path}" <<'PY'
-import json
-import sys
-from pathlib import Path
+python="${WANGP_PYTHON:-/opt/wan2gp-venv/bin/python}"
+wangp_root="${WANGP_ROOT:-/opt/Wan2GP}"
+proxy="${WANGP_PROXY:-/opt/nodetool-wan2gp-combined/auth_proxy.py}"
 
-path = Path(sys.argv[1])
-if not path.exists():
-    raise SystemExit(0)
-try:
-    config = json.loads(path.read_text(encoding="utf-8"))
-except (OSError, json.JSONDecodeError):
-    raise SystemExit("Existing WanGP config is unreadable; refusing to overwrite it")
+cd "${wangp_root}"
+"${python}" wgp.py --mcp --mcp-async --mcp-transport streamable-http \
+    --mcp-host 127.0.0.1 --mcp-port "${upstream_port}" \
+    --config "${config_dir}" &
+wangp_pid=$!
 
-legacy_keys = {"save_path", "image_save_path", "audio_save_path"}
-if isinstance(config, dict) and set(config) <= legacy_keys and "attention_mode" not in config:
-    backup = path.with_suffix(".incomplete.json")
-    counter = 1
-    while backup.exists():
-        backup = path.with_suffix(f".incomplete-{counter}.json")
-        counter += 1
-    path.rename(backup)
-    print(f"Archived incomplete WanGP config as {backup}.")
-PY
+WAN2GP_MCP_PORT="${public_port}" WANGP_UPSTREAM_PORT="${upstream_port}" "${python}" "${proxy}" &
+proxy_pid=$!
 
-echo "Starting authenticated NodeTool Python worker on ${worker_host}:${worker_port}."
-exec /opt/venv/bin/python -m nodetool.worker \
-    --host "${worker_host}" \
-    --port "${worker_port}"
+stop() {
+    kill -TERM "${wangp_pid}" "${proxy_pid}" 2>/dev/null || true
+}
+trap stop TERM INT
+
+echo "Serving WanGP's MCP server on port ${public_port}. Requests need Authorization: Bearer <WAN2GP_MCP_TOKEN>."
+status=0
+wait -n "${wangp_pid}" "${proxy_pid}" || status=$?
+stop
+wait "${wangp_pid}" "${proxy_pid}" 2>/dev/null || true
+exit "${status}"

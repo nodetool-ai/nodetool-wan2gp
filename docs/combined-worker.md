@@ -1,46 +1,26 @@
-# Combined image worker and secrets boundary
+# Combined image: processes and network boundary
 
-The combined image is a provider-only GPU execution worker, not a NodeTool main
-process. It runs one long-lived process: the authenticated NodeTool Python
-WebSocket worker on port 7777.
+The combined image runs two processes, both in WanGP's Python environment:
 
-The image does not start WanGP's MCP server, install the legacy Wan2GP node
-package, start the TypeScript backend, open a NodeTool database, use the desktop
-keychain, or create/read a `SECRETS_MASTER_KEY`.
+1. WanGP's MCP server: `wgp.py --mcp --mcp-async --mcp-transport
+   streamable-http`, bound to `127.0.0.1:7867` inside the container. It serves
+   MCP at `/mcp` and the one-use media transfer routes under `/wangp_api/`.
+2. `combined/auth_proxy.py`, bound to `0.0.0.0:7866`. It forwards a request
+   only when it carries `Authorization: Bearer <WAN2GP_MCP_TOKEN>`, compared in
+   constant time, and answers 401 otherwise. It strips that header and sets
+   `Host` to WanGP's loopback address before forwarding. Bodies stream in both
+   directions, so uploads and the MCP event stream are not buffered. It answers
+   502 while WanGP is not listening.
 
-The worker also advertises the `wangp` model-preparation backend. A
-`models.prepare` request launches a short-lived adapter in WanGP's isolated
-Python environment. The adapter calls WanGP's existing download functions and
-does not patch or replace them. It observes the model/cache directories and the
-adapter process's Linux I/O counters, reporting bytes written, transfer rate,
-active files, free disk space, and time since activity. Unknown remote totals
-are reported as `total_bytes: 0`. After the configured quiet period, progress
-continues with `stalled: true`; the worker does not abort automatically.
-The combined Dockerfile pins the NodeTool worker revision that implements this
-protocol so it does not depend on when the moving base image is rebuilt.
+The entrypoint stops the container when either process stops, with that
+process's exit status. The healthcheck asks the proxy for `/mcp` with the token
+and counts any answer from WanGP as healthy.
 
-The same worker advertises WanGP as a provider with dynamic video, image, TTS,
-and music model discovery. It implements `text_to_video`, `image_to_video`,
-`text_to_image`, `image_to_image`, `text_to_audio`, and encoded
-`text_to_speech` generation. These requests launch a short-lived adapter in
-WanGP's isolated interpreter and call its public in-process API directly. Model
-identifiers, output modality, and task capabilities come from the pinned WanGP
-runtime, including its `music` family marker used to keep music generators out
-of the speech list.
-
-Encoded input images and voice references cross the interpreter boundary
-through worker-owned temporary files. The adapter returns an output path and
-the worker streams the resulting image, video, or audio bytes over its existing
-authenticated chunked protocol. WanGP progress callbacks are relayed as
-provider progress frames. No WanGP code is imported into the NodeTool
-environment and no upstream source is modified.
-
-Generation parameters accept NodeTool's snake_case names and their camelCase
-aliases. A non-null snake_case value takes precedence when both are supplied.
-For resolution tiers such as `720p`, the adapter treats the number as the short
-side and uses `aspect_ratio` (or `aspectRatio`), defaulting to `16:9`. Thus `720p`
-becomes `1280x720`, or `720x1280` with `9:16`; calculated dimensions are rounded
-to whole pixels. Explicit dimensions such as `832x480` pass through unchanged.
+No NodeTool code runs in the image. It holds no NodeTool database, secret store
+or master key, and no provider credential. NodeTool's `lib.wan2gp` nodes and
+`wangp` provider call it with `WAN2GP_MCP_URL` and `WAN2GP_MCP_TOKEN`. Media
+crosses the network as gallery and file uploads and downloads through the
+transfer tickets WanGP issues, which NodeTool checks before it follows them.
 
 ## Runtime configuration
 
@@ -48,25 +28,9 @@ Starting the container requires both:
 
 - `WAN2GP_ACCEPT_LICENSE=1`, confirming review of the non-commercial bundle
   licenses; and
-- a strong, random `NODETOOL_WORKER_TOKEN`, shared with the external NodeTool
-  main process and used to authenticate the WebSocket connection.
+- a strong, random `WAN2GP_MCP_TOKEN`, shared with NodeTool.
 
-The external NodeTool main process attaches to the container only when
-`NODETOOL_WORKER_URL=ws://<gpu-host>:7777` is set alongside the same
-`NODETOOL_WORKER_TOKEN`. Without it, the main process starts a local Python
-worker instead.
-
-Only port 7777 is used or exposed. There is no internal WanGP HTTP service.
-
-## Request-scoped secrets
-
-The external NodeTool main process remains the sole owner of its encrypted
-secret store and master key. Before dispatching a node, main resolves only the
-settings required for that execution and includes them in the authenticated
-worker request's `secrets` map. The Python worker constructs the execution
-context from that map and does not decrypt or query the main process's store.
-
-Consequently, `NODETOOL_WORKER_TOKEN` authenticates the transport but is not a
-provider credential, and provider secrets should not be configured globally in
-the worker container. They exist in worker memory for the lifetime of the
-request that needs them.
+`WAN2GP_MCP_PORT` (default 7866) is the published port and
+`WANGP_UPSTREAM_PORT` (default 7867) is WanGP's loopback port. Only the
+published port is exposed. The proxy speaks plain HTTP: put TLS in front of it,
+or keep it on a private network, when NodeTool runs on another machine.
